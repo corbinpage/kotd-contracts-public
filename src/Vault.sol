@@ -23,6 +23,7 @@ contract Vault is ERC4626, Owned {
         Lord,
         King
     }
+    event StormTheCastle(address indexed stromAddress);
 
     constructor(address _asset, address _superTokenFactoryAddress) Owned(msg.sender) ERC4626(ERC20(_asset), 'Vault Token', 'VAULT') {
         _mint(address(this), 1e11);
@@ -36,9 +37,9 @@ contract Vault is ERC4626, Owned {
         require(court[msg.sender] == Court.None, 'You are already a member of the court');
         // Deposit to wETH
         uint256 depositAmount = 9e14;
-        SafeTransferLib.safeTransferETH(address(asset), depositAmount);
-        // Fire event
         storming[msg.sender] = true;
+        SafeTransferLib.safeTransferETH(address(asset), depositAmount);
+        emit StormTheCastle(msg.sender);
     }
 
     function confirmTheStorm() public onlyOwner {

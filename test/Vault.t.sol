@@ -31,10 +31,6 @@ contract VaultTest is Test {
         assertEq(ts, 1e24);
     }
 
-    function test_flowRate() public {
-        console.logInt(vault.totalFlowRate());
-    }
-
     function test_stormTheCastle() public {
         uint256 totalAssetsStart = vault.totalAssets();
         uint256 totalBalanceStart = address(vault).balance;

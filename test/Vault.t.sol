@@ -45,8 +45,6 @@ contract VaultTest is Test {
         assertEq(address(vault).balance, totalBalanceStart + 1e14);
         // Check wETH wrapped and added to vault
         assertEq(vault.totalAssets(), totalAssetsStart + 9e14);
-        // Make sure account is flagged as storming
-        assertEq(vault.storming(accountAddress), true);
     }
 
 }

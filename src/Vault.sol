@@ -16,14 +16,13 @@ contract Vault is ERC4626, Owned {
     ISuperToken public immutable superToken;
     uint256 public immutable minStormPrice;
     mapping(address => uint256) public stormBlock;
-    mapping(address => bool) public storming;
     // Events
     event StormTheCastle(address indexed stormAddress, uint256 indexed amountSent);
     // Custom Errors
     error BadAddress(address badAddress);
     error GameEnded();
     error InsufficientFunds(uint256 valueSent);
-    error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber, bool currentlyStorming);
+    error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber);
     error TooMuchFlow(uint256 totalFlowRate);
 
     constructor(address _asset, address _superTokenFactoryAddress, uint256 _gameDurationDays, uint256 _totalMint, uint256 _minStormPrice) Owned(msg.sender) ERC4626(ERC20(_asset), 'Vault Token', 'VAULT') {
@@ -41,8 +40,7 @@ contract Vault is ERC4626, Owned {
         if (msg.sender == address(0)) revert BadAddress(msg.sender);
         if (totalSupply <= 0) revert GameEnded();
         if (msg.value < minStormPrice) revert InsufficientFunds(msg.value);
-        if (storming[msg.sender] || stormBlock[msg.sender] + 1800 >= block.number) revert TooFrequentStorms(stormBlock[msg.sender] + 1800, block.number, storming[msg.sender]);
-        storming[msg.sender] = true;
+        if (stormBlock[msg.sender] + 1800 >= block.number) revert TooFrequentStorms(stormBlock[msg.sender] + 1800, block.number);
         // Deposit to wETH
         SafeTransferLib.safeTransferETH(address(asset), msg.value - 1e14);
         emit StormTheCastle(msg.sender, msg.value);

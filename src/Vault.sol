@@ -28,10 +28,10 @@ contract Vault is ERC4626, Owned {
     // Role
     enum CourtRole {
         None,
-        Townsfolk,
-        Knight,
+        King,
         Lord,
-        King
+        Knight,
+        Townsfolk
     }
     // Events
     event StormTheCastle(address indexed stormAddress, uint256 indexed amountSent);
@@ -51,10 +51,12 @@ contract Vault is ERC4626, Owned {
         superToken = ISuperTokenFactory(_superTokenFactoryAddress).createERC20Wrapper(IERC20Metadata(address(this)), asset.decimals(), ISuperTokenFactory.Upgradability.FULL_UPGRADABLE, 'Super Vault Token', 'VAULTx');
         // Flow rates
         uint256 _totalFlowRate = _totalMint / (_gameDurationDays * 24 * 60 * 60);
-        uint256 _kingRate = calculatePercentage(_totalFlowRate, 3333);
+        uint256 _kingRate = calculatePercentage(_totalFlowRate, 3300);
         if (_kingRate > uint256(uint96(type(int96).max))) revert TooMuchFlow(_kingRate);
         flowRates[CourtRole.King] = int96(uint96(_kingRate));
-
+        flowRates[CourtRole.Lord] = int96(uint96(calculatePercentage(_totalFlowRate, 1400)));
+        flowRates[CourtRole.Knight] = int96(uint96(calculatePercentage(_totalFlowRate, 700)));
+        flowRates[CourtRole.Townsfolk] = int96(uint96(calculatePercentage(_totalFlowRate, 450)));
     }
 
     function initGame() public onlyOwner {
@@ -70,6 +72,7 @@ contract Vault is ERC4626, Owned {
         if (courtRoles[msg.sender] != CourtRole.None) revert AlreadyCourtMember(msg.sender, courtRoles[msg.sender]);
         storming[msg.sender] = true;
         storms++;
+        stormBlock[msg.sender] = block.number;
         // Deposit to wETH
         SafeTransferLib.safeTransferETH(address(asset), msg.value - 1e14);
         emit StormTheCastle(msg.sender, msg.value);
@@ -80,14 +83,30 @@ contract Vault is ERC4626, Owned {
         if (courtRoles[accountAddress] != CourtRole.None) revert AlreadyCourtMember(accountAddress, courtRole);
         // Switch flows
         if (courtRole == CourtRole.King) {
-            switchFlows(king, accountAddress, flowRates[courtRole]);
+            switchFlows(king, accountAddress, flowRates[CourtRole.King]);
             king = accountAddress;
+        } else if (courtRole == CourtRole.Lord) {
+            switchFlows(lords[0], accountAddress, flowRates[CourtRole.Lord]);
+            lords[0] = lords[1];
+            lords[1] = accountAddress;
+        } else if (courtRole == CourtRole.Knight) {
+            switchFlows(knights[0], accountAddress, flowRates[CourtRole.Knight]);
+            knights[0] = knights[1];
+            knights[1] = knights[2];
+            knights[2] = accountAddress;
+        } else {
+            switchFlows(townsfolk[0], accountAddress, flowRates[CourtRole.Townsfolk]);
+            townsfolk[0] = townsfolk[1];
+            townsfolk[1] = townsfolk[2];
+            townsfolk[2] = townsfolk[3];
+            townsfolk[3] = accountAddress;
         }
         storming[accountAddress] = false;
+        courtRoles[accountAddress] = courtRole;
     }
 
     function switchFlows(address oldFlow, address newFlow, int96 flowRate) private {
-        bool deleteResult = superToken.deleteFlow(address(this), oldFlow);
+        bool deleteResult = oldFlow == address(0) ? true : superToken.deleteFlow(address(this), oldFlow);
         bool createResult = superToken.createFlow(newFlow, flowRate);
         if (!(deleteResult && createResult)) revert SwitchFlowRateError(oldFlow, newFlow, flowRate);
     }
@@ -99,6 +118,10 @@ contract Vault is ERC4626, Owned {
 
     function totalAssets() public view virtual override returns (uint256) {
         return asset.balanceOf(address(this));
+    }
+
+    function readFlowRate(address accountAddress) public view returns (int96) {
+        return superToken.getFlowRate(address(this), accountAddress);
     }
 
     receive() external payable {}

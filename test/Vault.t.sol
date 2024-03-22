@@ -7,7 +7,10 @@ import {ISuperfluid, ISuperToken} from "superfluid-contracts/interfaces/superflu
 
 contract VaultTest is Test {
     Vault public vault;
-    address public accountAddress = address(12345);
+    int96 public immutable expectedKingFlowRate = 12731481481481481481481;
+    int96 public immutable expectedLordFlowRate = 5401234567901234567901;
+    int96 public immutable expectedKnightFlowRate = 2700617283950617283950;
+    int96 public immutable expectedTownsfolkFlowRate = 1736111111111111111111;
     event StormTheCastle(address indexed stormAddress, uint256 indexed amountSent);
 
     function setUp() public {
@@ -19,10 +22,6 @@ contract VaultTest is Test {
             1e15
         );
         vault.initGame();
-        //            address(1337),
-        //            [address(11), address(12)],
-        //            [address(13), address(14), address(15)],
-        //            [address(16), address(17), address(18), address(19)]
     }
 
     function test_totalSupply() public {
@@ -31,17 +30,19 @@ contract VaultTest is Test {
     }
 
     function test_flowRate() public {
-        assertEq(12858796296296296296296, vault.flowRates(Vault.CourtRole.King));
+        assertEq(expectedKingFlowRate, vault.flowRates(Vault.CourtRole.King));
+        assertEq(expectedLordFlowRate, vault.flowRates(Vault.CourtRole.Lord));
+        assertEq(expectedKnightFlowRate, vault.flowRates(Vault.CourtRole.Knight));
+        assertEq(expectedTownsfolkFlowRate, vault.flowRates(Vault.CourtRole.Townsfolk));
     }
 
     function test_stormTheCastle() public {
         uint256 totalAssetsStart = vault.totalAssets();
         uint256 totalBalanceStart = address(vault).balance;
-        // Switch to accountAddress
-        hoax(accountAddress);
+        hoax(address(12345));
         // Event
         vm.expectEmit(true, true, false, false);
-        emit StormTheCastle(accountAddress, 1e15);
+        emit StormTheCastle(address(12345), 1e15);
         // Storm the castle
         vault.stormTheCastle{value: 1e15}();
         // Check protocol fee as native
@@ -49,7 +50,12 @@ contract VaultTest is Test {
         // Check wETH wrapped and added to vault
         assertEq(vault.totalAssets(), totalAssetsStart + 9e14);
         // Make sure account is flagged as storming
-        assertEq(vault.storming(accountAddress), true);
+        assertEq(vault.storming(address(12345)), true);
+    }
+
+    function test_confirmTheStorm() public {
+        vault.confirmTheStorm(address(12345), Vault.CourtRole.Lord);
+        assertEq(expectedLordFlowRate, vault.readFlowRate(address(12345)));
     }
 
 }

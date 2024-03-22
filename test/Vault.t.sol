@@ -44,18 +44,21 @@ contract VaultTest is Test {
         vm.expectEmit(true, true, false, false);
         emit StormTheCastle(address(12345), 1e15);
         // Storm the castle
-        vault.stormTheCastle{value: 1e15}();
+        Vault.CourtRole courtRole = vault.stormTheCastle{value: 1e15}();
+        console.logUint(uint8(courtRole));
         // Check protocol fee as native
         assertEq(address(vault).balance, totalBalanceStart + 1e14);
         // Check wETH wrapped and added to vault
         assertEq(vault.totalAssets(), totalAssetsStart + 9e14);
-        // Make sure account is flagged as storming
-        assertEq(vault.storming(address(12345)), true);
+        // Check flow
+        if (courtRole == Vault.CourtRole.King) {
+            assertEq(expectedKingFlowRate, vault.readFlowRate(address(12345)));
+        } else if (courtRole == Vault.CourtRole.Lord) {
+            assertEq(expectedLordFlowRate, vault.readFlowRate(address(12345)));
+        } else if (courtRole == Vault.CourtRole.Knight) {
+            assertEq(expectedKnightFlowRate, vault.readFlowRate(address(12345)));
+        } else {
+            assertEq(expectedTownsfolkFlowRate, vault.readFlowRate(address(12345)));
+        }
     }
-
-    function test_confirmTheStorm() public {
-        vault.confirmTheStorm(address(12345), Vault.CourtRole.Lord);
-        assertEq(expectedLordFlowRate, vault.readFlowRate(address(12345)));
-    }
-
 }

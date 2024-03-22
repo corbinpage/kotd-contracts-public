@@ -10,13 +10,13 @@ import {SuperTokenV1Library} from "superfluid-contracts/apps/SuperTokenV1Library
 import {ISuperTokenFactory} from "superfluid-contracts/interfaces/superfluid/ISuperTokenFactory.sol";
 import {SuperTokenV1Library} from "superfluid-contracts/apps/SuperTokenV1Library.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Dice} from "./lib/Dice.sol";
 
 contract Vault is ERC4626, Owned {
     using SuperTokenV1Library for ISuperToken;
     ISuperToken public immutable superToken;
     uint256 public immutable minStormPrice;
     mapping(address => uint256) public stormBlock;
-    mapping(address => bool) public storming;
     mapping(address => CourtRole) public courtRoles;
     mapping(CourtRole => int96) public flowRates;
     uint256 public storms;
@@ -39,7 +39,7 @@ contract Vault is ERC4626, Owned {
     error BadAddress(address badAddress);
     error GameEnded();
     error InsufficientFunds(uint256 valueSent);
-    error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber, bool currentlyStorming);
+    error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber);
     error AlreadyCourtMember(address accountAddress, CourtRole courtRole);
     error BadCourtRole(CourtRole courtRole);
     error TooMuchFlow(uint256 kingFlowrate);
@@ -64,23 +64,48 @@ contract Vault is ERC4626, Owned {
         superToken.upgrade(this.totalSupply());
     }
 
-    function stormTheCastle() public payable {
+    function stormTheCastle() public payable returns (CourtRole) {
         if (msg.sender == address(0)) revert BadAddress(msg.sender);
-        if (totalSupply <= 0) revert GameEnded();
+        if (superToken.totalSupply() <= 0) revert GameEnded();
         if (msg.value < minStormPrice) revert InsufficientFunds(msg.value);
-        if (storming[msg.sender] || stormBlock[msg.sender] + 1800 >= block.number) revert TooFrequentStorms(stormBlock[msg.sender] + 1800, block.number, storming[msg.sender]);
+        if (stormBlock[msg.sender] + 1800 >= block.number) revert TooFrequentStorms(stormBlock[msg.sender] + 1800, block.number);
         if (courtRoles[msg.sender] != CourtRole.None) revert AlreadyCourtMember(msg.sender, courtRoles[msg.sender]);
-        storming[msg.sender] = true;
         storms++;
         stormBlock[msg.sender] = block.number;
+        // Determine courtRole
+        CourtRole courtRole = rollForRole();
+        confirmTheStorm(msg.sender, courtRole);
         // Deposit to wETH
         SafeTransferLib.safeTransferETH(address(asset), msg.value - 1e14);
         emit StormTheCastle(msg.sender, msg.value);
+        return courtRole;
     }
 
-    function confirmTheStorm(address accountAddress, CourtRole courtRole) public onlyOwner {
-        if (courtRole == CourtRole.None) revert BadCourtRole(courtRole);
-        if (courtRoles[accountAddress] != CourtRole.None) revert AlreadyCourtMember(accountAddress, courtRole);
+    function rollForRole() private returns (CourtRole) {
+        uint256 random = Dice.rollDiceSet(1, 100, randomSeed());
+        if (random >= 1 && random <= 5) {
+            // 3%
+            return CourtRole.King;
+        } else if (random >= 6 && random <= 20) {
+            // 7%
+            return CourtRole.Lord;
+        } else if (random >= 21 && random <= 50) {
+            // 14%
+            return CourtRole.Knight;
+        } else {
+            return CourtRole.Townsfolk;
+        }
+    }
+
+    function randomSeed() private view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(
+            tx.origin,
+            blockhash(block.number - 1),
+            block.timestamp
+        )));
+    }
+
+    function confirmTheStorm(address accountAddress, CourtRole courtRole) private {
         // Switch flows
         if (courtRole == CourtRole.King) {
             switchFlows(king, accountAddress, flowRates[CourtRole.King]);
@@ -101,7 +126,6 @@ contract Vault is ERC4626, Owned {
             townsfolk[2] = townsfolk[3];
             townsfolk[3] = accountAddress;
         }
-        storming[accountAddress] = false;
         courtRoles[accountAddress] = courtRole;
     }
 

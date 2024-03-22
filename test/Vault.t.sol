@@ -15,24 +15,23 @@ contract VaultTest is Test {
             0x4200000000000000000000000000000000000006,
             0xfcF0489488397332579f35b0F711BE570Da0E8f5,
             30,
-            1e24,
+            1e29,
             1e15
         );
-        vault.initGame(
-            address(1337),
-            [address(11), address(12)],
-            [address(13), address(14), address(15)],
-            [address(16), address(17), address(18), address(19)]
-        );
+        vault.initGame();
+        //            address(1337),
+        //            [address(11), address(12)],
+        //            [address(13), address(14), address(15)],
+        //            [address(16), address(17), address(18), address(19)]
     }
 
     function test_totalSupply() public {
         uint256 ts = vault.totalSupply();
-        assertEq(ts, 1e24);
+        assertEq(ts, 1e29);
     }
 
     function test_flowRate() public {
-        console.logInt(vault.totalFlowRate());
+        assertEq(12858796296296296296296, vault.flowRates(Vault.CourtRole.King));
     }
 
     function test_stormTheCastle() public {

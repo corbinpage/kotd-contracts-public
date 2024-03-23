@@ -34,7 +34,7 @@ contract Vault is ERC4626, Owned {
         Townsfolk
     }
     // Events
-    event StormTheCastle(address indexed stormAddress, uint256 indexed amountSent);
+    event StormTheCastle(address indexed accountAddress, uint8 indexed courtRole, uint256 indexed amountSent);
     // Custom Errors
     error BadAddress(address badAddress);
     error GameEnded();
@@ -45,10 +45,10 @@ contract Vault is ERC4626, Owned {
     error TooMuchFlow(uint256 kingFlowrate);
     error SwitchFlowRateError(address oldAddress, address newAddress, int96 flowRate);
 
-    constructor(address _asset, address _superTokenFactoryAddress, uint256 _gameDurationDays, uint256 _totalMint, uint256 _minStormPrice) Owned(msg.sender) ERC4626(ERC20(_asset), 'Vault Token', 'VAULT') {
+    constructor(address _asset, address _superTokenFactoryAddress, uint256 _gameDurationDays, uint256 _totalMint, uint256 _minStormPrice) Owned(msg.sender) ERC4626(ERC20(_asset), 'King Token', 'KING') {
         minStormPrice = _minStormPrice;
         _mint(address(this), _totalMint);
-        superToken = ISuperTokenFactory(_superTokenFactoryAddress).createERC20Wrapper(IERC20Metadata(address(this)), asset.decimals(), ISuperTokenFactory.Upgradability.FULL_UPGRADABLE, 'Super Vault Token', 'VAULTx');
+        superToken = ISuperTokenFactory(_superTokenFactoryAddress).createERC20Wrapper(IERC20Metadata(address(this)), asset.decimals(), ISuperTokenFactory.Upgradability.FULL_UPGRADABLE, 'Super King Token', 'KINGx');
         // Flow rates
         uint256 _totalFlowRate = _totalMint / (_gameDurationDays * 24 * 60 * 60);
         uint256 _kingRate = calculatePercentage(_totalFlowRate, 3300);
@@ -64,7 +64,7 @@ contract Vault is ERC4626, Owned {
         superToken.upgrade(this.totalSupply());
     }
 
-    function stormTheCastle() public payable returns (CourtRole) {
+    function stormTheCastle() public payable {
         if (msg.sender == address(0)) revert BadAddress(msg.sender);
         if (superToken.totalSupply() <= 0) revert GameEnded();
         if (msg.value < minStormPrice) revert InsufficientFunds(msg.value);
@@ -77,22 +77,22 @@ contract Vault is ERC4626, Owned {
         confirmTheStorm(msg.sender, courtRole);
         // Deposit to wETH
         SafeTransferLib.safeTransferETH(address(asset), msg.value - 1e14);
-        emit StormTheCastle(msg.sender, msg.value);
-        return courtRole;
+        emit StormTheCastle(msg.sender, uint8(courtRole), msg.value);
     }
 
-    function rollForRole() private returns (CourtRole) {
+    function rollForRole() private view returns (CourtRole) {
         uint256 random = Dice.rollDiceSet(1, 100, randomSeed());
         if (random >= 1 && random <= 5) {
-            // 3%
+            // 5%
             return CourtRole.King;
-        } else if (random >= 6 && random <= 20) {
-            // 7%
+        } else if (random >= 6 && random <= 15) {
+            // 10%
             return CourtRole.Lord;
-        } else if (random >= 21 && random <= 50) {
-            // 14%
+        } else if (random >= 16 && random <= 36) {
+            // 20%
             return CourtRole.Knight;
         } else {
+            // 65%
             return CourtRole.Townsfolk;
         }
     }

@@ -11,7 +11,6 @@ contract VaultTest is Test {
     int96 public immutable expectedLordFlowRate = 5401234567901234567901;
     int96 public immutable expectedKnightFlowRate = 2700617283950617283950;
     int96 public immutable expectedTownsfolkFlowRate = 1736111111111111111111;
-    event StormTheCastle(address indexed stormAddress, uint256 indexed amountSent);
 
     function setUp() public {
         vault = new Vault(
@@ -37,25 +36,31 @@ contract VaultTest is Test {
     }
 
     function test_stormTheCastle() public {
+        vm.recordLogs();
         uint256 totalAssetsStart = vault.totalAssets();
         uint256 totalBalanceStart = address(vault).balance;
         hoax(address(12345));
-        // Event
-        vm.expectEmit(true, true, false, false);
-        emit StormTheCastle(address(12345), 1e15);
         // Storm the castle
-        Vault.CourtRole courtRole = vault.stormTheCastle{value: 1e15}();
-        console.logUint(uint8(courtRole));
+        vault.stormTheCastle{value: 1e15}();
+        // Event
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        assertEq(entries[8].topics[0], keccak256("StormTheCastle(address,uint8,uint256)"));
+        assertEq(address(uint160(uint256(entries[8].topics[1]))), address(12345));
+        uint8 courtRole = uint8(uint256(entries[8].topics[2]));
+        assertGe(courtRole, 0);
+        assertLe(courtRole, 5);
+        assertEq(uint256(entries[8].topics[3]), 1e15);
+
         // Check protocol fee as native
         assertEq(address(vault).balance, totalBalanceStart + 1e14);
         // Check wETH wrapped and added to vault
         assertEq(vault.totalAssets(), totalAssetsStart + 9e14);
         // Check flow
-        if (courtRole == Vault.CourtRole.King) {
+        if (courtRole == 1) {
             assertEq(expectedKingFlowRate, vault.readFlowRate(address(12345)));
-        } else if (courtRole == Vault.CourtRole.Lord) {
+        } else if (courtRole == 2) {
             assertEq(expectedLordFlowRate, vault.readFlowRate(address(12345)));
-        } else if (courtRole == Vault.CourtRole.Knight) {
+        } else if (courtRole == 3) {
             assertEq(expectedKnightFlowRate, vault.readFlowRate(address(12345)));
         } else {
             assertEq(expectedTownsfolkFlowRate, vault.readFlowRate(address(12345)));

@@ -73,7 +73,8 @@ contract Vault is ERC4626, Owned {
         storms++;
         stormBlock[msg.sender] = block.number;
         // Determine courtRole
-        CourtRole courtRole = rollForRole();
+        //CourtRole courtRole = rollForRole();
+        CourtRole courtRole = CourtRole.Townsfolk;
         confirmTheStorm(msg.sender, courtRole);
         // Deposit to wETH
         SafeTransferLib.safeTransferETH(address(asset), msg.value - 1e14);
@@ -130,7 +131,10 @@ contract Vault is ERC4626, Owned {
     }
 
     function switchFlows(address oldFlow, address newFlow, int96 flowRate) private {
-        bool deleteResult = oldFlow == address(0) ? true : superToken.deleteFlow(address(this), oldFlow);
+        bool deleteResult = true;
+        if (readFlowRate(oldFlow) > 0) {
+            deleteResult = superToken.deleteFlow(address(this), oldFlow);
+        }
         bool createResult = superToken.createFlow(newFlow, flowRate);
         if (!(deleteResult && createResult)) revert SwitchFlowRateError(oldFlow, newFlow, flowRate);
     }

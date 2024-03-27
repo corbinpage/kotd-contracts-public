@@ -97,6 +97,11 @@ contract KingOfTheCastle is ERC4626, Owned {
         confirmTheStorm(_townsfolk[3], CourtRole.Townsfolk);
     }
 
+    function collectProtocolFees() public onlyOwner {
+        if (address(this).balance <= 0) revert NoProtocolFees(address(this).balance);
+        SafeTransferLib.safeTransferETH(msg.sender, address(this).balance);
+    }
+
     function stormTheCastle(uint256 _randomSeed, uint256 _fid) public payable {
         if (msg.sender == address(0)) revert BadAddress(msg.sender);
         if (superToken.totalSupply() <= 0) revert GameEnded();

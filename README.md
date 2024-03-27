@@ -1,66 +1,32 @@
-## Foundry
+## King of the Castle Game
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
-
-Foundry consists of:
-
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
+### Court Roles
+```solidity
+enum CourtRole {
+        None,
+        King,
+        Lord,
+        Knight,
+        Townsfolk
+    }
 ```
+Returns as a uint8, so King = 1, Townsfolk = 4, etc.
 
-### Test
-
-```shell
-$ forge test
+Use: 
+```solidity
+function determineCourtRole(address accountAddress, uint256 _randomSeed) public pure returns (CourtRole)`
 ```
+to get the CourtRole making sure the `accountAddress` is the address that will be submitting the transaction.
+* `_randomSeed` should be generated in the frame once and same number should be passed to both `determineCourtRole()` & `stormTheCastle()`
+### Storm
+To play the game: `stormTheCastle(uint256 _randomSeed, uint256 _fid)` - Costs ~825k gas
 
-### Format
+Total number of players can be pulled from blockchain by calling `storms()` which `returns (uint256)`
 
-```shell
-$ forge fmt
+### Event
+```solidity
+event StormTheCastle(address indexed accountAddress, uint8 indexed courtRole, uint256 indexed amountSent, uint256 fid);
 ```
+is emitted on successful storm.
 
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+Hash: `0xd1611e3a49d370878089b825553ec2e240770ea33b54c67ebbf637fc567be8df`

@@ -30,3 +30,16 @@ event StormTheCastle(address indexed accountAddress, uint8 indexed courtRole, ui
 is emitted on successful storm.
 
 Hash: `0xd1611e3a49d370878089b825553ec2e240770ea33b54c67ebbf637fc567be8df`
+
+### Court State
+```solidity
+    // Court
+    address[1] public king;
+    address[2] public lords;
+    address[3] public knights;
+    address[4] public townsfolk;
+```
+To get the current king use `contract.king(0)`, current lords `contract.lords(0)`, `contract.lords(1)`, etc.
+
+### Storm block
+You can get the last block that an address stormed the castle using `contract.stormBlock(address)`. The contract will not allow an address to storm more than once every 1800 blocks.

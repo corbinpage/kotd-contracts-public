@@ -39,7 +39,7 @@ contract DeployKingOfTheCastleScript is Script {
         );
         console.log("KingOfTheCastle Game deployed at: %s", address(kingOfTheCastle));
         console.log("KING token Total supply: %s", kingOfTheCastle.totalSupply());
-        //initGame();
+        initGame();
         //transferOwnership(0x6Ca74A32F864918a7399d37592438A80Ec7Ec8D9);
         vm.stopBroadcast();
     }

@@ -45,6 +45,7 @@ contract KingOfTheCastle is ERC4626, Owned {
     error BadCourtRole(CourtRole courtRole);
     error TooMuchFlow(uint256 totalFlowrate);
     error SwitchFlowRateError(address oldAddress, address newAddress, int96 flowRate);
+    error NoProtocolFees(uint256 balance);
 
     constructor(
         address _asset,

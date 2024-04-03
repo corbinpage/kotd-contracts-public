@@ -10,6 +10,7 @@ contract KingOfTheDegen is Owned {
     uint256 public immutable minPlayAmount;
     uint256 public immutable protocolFee;
     uint256 public immutable stormFrequencyBlocks;
+    uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
@@ -44,6 +45,8 @@ contract KingOfTheDegen is Owned {
     error BadZeroAddress();
     error GameNotActive(uint256 gameStartBlock, uint256 gameEndBlock, uint256 currentBlock);
     error GameStillActive();
+    error RedeemStillActive(uint256 redeemEndedBlock);
+    error RedeemEnded();
     error InsufficientFunds(uint256 valueSent);
     error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber);
     error AlreadyCourtMember(address accountAddress, CourtRole courtRole);
@@ -56,12 +59,14 @@ contract KingOfTheDegen is Owned {
         uint256 _minPlayAmount,
         uint256 _protocolFee,
         uint256 _stormFrequencyBlocks,
+        uint256 _redeemAfterGameEndedBlocks,
         uint256[4] memory _courtBps
     ) Owned(msg.sender) {
         gameDurationBlocks = _gameDurationBlocks;
         minPlayAmount = _minPlayAmount;
         protocolFee = _protocolFee;
         stormFrequencyBlocks = _stormFrequencyBlocks;
+        redeemAfterGameEndedBlocks = _redeemAfterGameEndedBlocks;
         // Court Bps
         for (uint256 i = 0;i < 4;i++) {
             courtBps[CourtRole(i + 1)] = _courtBps[i];
@@ -89,6 +94,19 @@ contract KingOfTheDegen is Owned {
         gameStartBlock = block.number;
     }
 
+    function collectProtocolFees() public onlyOwner {
+        if (protocolFeeBalance == 0) revert NoNativeToSend();
+        if (!isGameEnded()) revert GameStillActive();
+        SafeTransferLib.safeTransferETH(msg.sender, protocolFeeBalance);
+        protocolFeeBalance = 0;
+    }
+
+    function protocolRedeem() public onlyOwner {
+        uint256 redeemEndedBlock = gameEndBlock() + redeemAfterGameEndedBlocks;
+        if (block.number <= redeemEndedBlock) revert RedeemStillActive(redeemEndedBlock);
+        SafeTransferLib.safeTransferETH(msg.sender, address(this).balance);
+    }
+
     function stormTheCastle(uint256 _randomSeed, uint256 _fid) public payable {
         if (msg.sender == address(0)) revert BadZeroAddress();
         if (!isGameActive()) revert GameNotActive(gameStartBlock, gameEndBlock(), block.number);
@@ -97,7 +115,10 @@ contract KingOfTheDegen is Owned {
             stormBlock[msg.sender] + stormFrequencyBlocks,
             block.number
         );
-        if (courtRoles[msg.sender] != CourtRole.None) revert AlreadyCourtMember(msg.sender, courtRoles[msg.sender]);
+        if (courtRoles[msg.sender] != CourtRole.None) revert AlreadyCourtMember(
+            msg.sender,
+            courtRoles[msg.sender]
+        );
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks
@@ -111,7 +132,7 @@ contract KingOfTheDegen is Owned {
     }
 
     function isGameStarted() public view returns (bool) {
-        return gameStartBlock >= block.number;
+        return gameStartBlock <= block.number;
     }
 
     function isGameEnded() public view returns (bool) {
@@ -126,26 +147,40 @@ contract KingOfTheDegen is Owned {
         return gameStartBlock + (gameDurationBlocks - 1);
     }
 
-    function collectProtocolFees() public {
-        if (protocolFeeBalance == 0) revert NoNativeToSend();
-        SafeTransferLib.safeTransferETH(owner, address(this).balance);
-    }
-
     function totalAssets() public view returns (uint256) {
         return address(this).balance - protocolFeeBalance;
     }
 
     function redeem() public {
-        if (!isGameStarted() || !isGameEnded()) revert GameStillActive();
+        if (isGameActive()) revert GameStillActive();
+        if (address(this).balance == 0) revert RedeemEnded();
+        // Close out stream if this user still in court
+        if (courtRoles[msg.sender] != CourtRole.None) {
+            stopPointsFlow(msg.sender, courtRoles[msg.sender]);
+        }
         if (pointsBalance[msg.sender] == 0) revert NoNativeToSend();
         uint256 nativeToSend = convertPointsToNative(pointsBalance[msg.sender]);
         SafeTransferLib.safeTransferETH(msg.sender, nativeToSend);
+        // Clear points balance
+        pointsBalance[msg.sender] = 0;
         emit Redeemed(msg.sender, nativeToSend);
+    }
 
+    function getTotalPoints() public view returns (uint256) {
+        return gameDurationBlocks * totalPointsPerBlock;
+    }
+
+    function getPointsPerBlock(CourtRole courtRole) public view returns (uint256) {
+        uint256 bps = courtBps[courtRole];
+        return (totalPointsPerBlock * bps / 10_000);
     }
 
     function determineCourtRole(address accountAddress, uint256 _randomSeed) public pure returns (CourtRole) {
-        uint256 random = Dice.rollDiceSet(1, 100, uint256(keccak256(abi.encodePacked(accountAddress, _randomSeed))));
+        uint256 random = Dice.rollDiceSet(
+            1,
+            100,
+            uint256(keccak256(abi.encodePacked(accountAddress, _randomSeed)))
+        );
         if (random >= 1 && random <= 5) {
             // 5%
             return CourtRole.King;
@@ -217,27 +252,17 @@ contract KingOfTheDegen is Owned {
         uint256 endBlockNumber,
         CourtRole courtRole
     ) private view returns (uint256) {
-        if (endBlockNumber > gameEndBlock()) endBlockNumber = gameEndBlock();
+        endBlockNumber = endBlockNumber > gameEndBlock() ? gameEndBlock() : endBlockNumber;
         if (roleStartBlock[accountAddress] == 0 || endBlockNumber <= roleStartBlock[accountAddress]) return 0;
         return (endBlockNumber - roleStartBlock[accountAddress]) * getPointsPerBlock(courtRole);
     }
 
-    function getPointsPerBlock(CourtRole courtRole) private view returns (uint256) {
-        uint256 bps = courtBps[courtRole];
-        return (totalPointsPerBlock * bps / 10_000);
-    }
-
-    function convertPointsToNative(uint256 points) private view returns (uint256) {
-        uint256 factor = 1e18;
+    function convertPointsToNative(uint256 points) public view returns (uint256) {
         // Ensure points is not too large to cause overflow
-        assert(points <= type(uint256).max / factor);
-        uint256 pointsAdjusted = points * factor;
+        assert(points <= type(uint256).max / 1e18);
+        uint256 pointsAdjusted = points * 1e18;
         uint256 percentage = pointsAdjusted / getTotalPoints();
-        return (totalAssets() * percentage) / factor;
-    }
-
-    function getTotalPoints() private view returns (uint256) {
-        return gameDurationBlocks * totalPointsPerBlock;
+        return (totalAssets() * percentage) / 1e18;
     }
 
     receive() external payable {}

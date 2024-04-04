@@ -7,7 +7,11 @@ import {KingOfTheDegen} from "../src/KingOfTheDegen.sol";
 contract KingOfTheDegenTest is Test {
     KingOfTheDegen public kingOfTheDegen;
     address public immutable userAddress = address(12345);
+    uint256 public immutable userAddressKingSeed = 23;
+    address public immutable altUserAddress = address(123456789);
+    uint256 public immutable altUserAddressKingSeed = 2;
     bytes32 public immutable stormEventHash = keccak256("StormTheCastle(address,uint8,uint256,uint256)");
+    bytes32 public immutable redeemEventHash = keccak256("Redeemed(address,uint256,uint256)");
 
     // Settings
     uint256 public immutable gameDurationBlocks = 42300;
@@ -27,6 +31,12 @@ contract KingOfTheDegenTest is Test {
         KingOfTheDegen.CourtRole courtRole;
         uint256 amountSent;
         uint256 fid;
+    }
+
+    struct RedeemResults {
+        address accountAddress;
+        uint256 amountRedeemed;
+        uint256 pointsRedeemed;
     }
 
     function setUp() public {
@@ -62,15 +72,20 @@ contract KingOfTheDegenTest is Test {
         vm.roll(origBlockNumber + 10);
         assertEq(kingOfTheDegen.isGameActive(), true);
         // Increment block.number to last active block
-        vm.roll(origBlockNumber + (gameDurationBlocks - 1));
+        uint256 expectedLastGameBlock = origBlockNumber + (gameDurationBlocks - 1);
+        vm.roll(expectedLastGameBlock);
         assertEq(kingOfTheDegen.isGameActive(), true);
+        assertEq(expectedLastGameBlock, kingOfTheDegen.gameLastBlock());
         // Increment block.number to game end
-        vm.roll(origBlockNumber + gameDurationBlocks);
+        uint256 expectedEndGameBlock = origBlockNumber + gameDurationBlocks;
+        vm.roll(expectedEndGameBlock);
         assertEq(kingOfTheDegen.isGameEnded(), true);
         assertEq(kingOfTheDegen.isGameActive(), false);
+        assertEq(expectedEndGameBlock, kingOfTheDegen.gameEndBlock());
     }
 
     function test_StormTheCastleEvent() public {
+        hoax(userAddress);
         StormResults memory stormResults = doStorm();
         // User Address
         assertEq(stormResults.accountAddress, userAddress);
@@ -85,6 +100,7 @@ contract KingOfTheDegenTest is Test {
     }
 
     function test_ProtocolFees() public {
+        hoax(userAddress);
         doStorm();
         // Check protocol fee as native
         assertEq(kingOfTheDegen.protocolFeeBalance(), protocolFee);
@@ -106,23 +122,74 @@ contract KingOfTheDegenTest is Test {
     }
 
     function test_FlowRates() public {
+        hoax(userAddress);
         StormResults memory stormResults = doStorm(random(), 0);
-        console.logUint(kingOfTheDegen.totalAssets());
-        uint256 expectedAmount = calculatePercentage(kingOfTheDegen.totalAssets(), stormResults.courtRole);
+        uint256 expectedAmount = getPercentageFromCourtRole(
+            kingOfTheDegen.totalAssets(),
+            stormResults.courtRole
+        );
         // Fast forward to end of game
-        vm.roll(block.number + gameDurationBlocks);
-        vm.prank(userAddress);
+        vm.roll(kingOfTheDegen.gameEndBlock());
+        assertEq(kingOfTheDegen.isGameEnded(), true);
         uint256 balanceBefore = userAddress.balance;
+        doRedeem(userAddress);
+        assertEq(balanceBefore + expectedAmount, userAddress.balance);
+    }
+
+    function test_King() public {
+        hoax(userAddress);
+        uint256 origBlockNumber = block.number;
+        StormResults memory stormResults = doStorm(userAddressKingSeed, 0);
+        uint256 userBalanceBefore = userAddress.balance;
+        uint256 expectedUserPoints = kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * (gameDurationBlocks);
+        // Fast forward 10_000 blocks
+//        vm.roll(block.number + 10000);
+//        hoax(altUserAddress);
+//        StormResults memory altStormResults = doStorm(altUserAddressKingSeed, 0);
+//        console.log(kingOfTheDegen.totalAssets());
+//        uint256 altUserBalanceBefore = altUserAddress.balance;
+//        uint256 expectedAltUserPoints =
+//            kingOfTheDegen.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - 1001);
+        // Fast forward to end of game
+        vm.roll(kingOfTheDegen.gameEndBlock());
+//        assertEq(kingOfTheDegen.king(0), altUserAddress);
+        RedeemResults memory redeemResults = doRedeem(userAddress);
+        console.logUint(expectedUserPoints);
+        console.logUint(redeemResults.pointsRedeemed);
+        console.logUint(kingOfTheDegen.convertPointsToNative(expectedUserPoints));
+        console.logUint(redeemResults.amountRedeemed);
+        //console.logUint(userAddress.balance - (userBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedUserPoints)));
+//        assertEq(
+//            userBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedUserPoints),
+//            userAddress.balance
+//        );
+//        assertEq(
+//            altUserBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedAltUserPoints),
+//            userAddress.balance
+//        );
+    }
+
+    function doRedeem(address accountAddress) private returns (RedeemResults memory) {
+        vm.recordLogs();
+        vm.prank(accountAddress);
         kingOfTheDegen.redeem();
-        //console.logUint(userAddress.balance - (balanceBefore + expectedAmount));
-        //console.logUint((balanceBefore + expectedAmount) - userAddress.balance);
-        console.logUint(expectedAmount);
-        console.logUint(kingOfTheDegen.convertPointsToNative(kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks));
-        //assertEq(balanceBefore + expectedAmount, userAddress.balance);
+        // Event
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        uint256 redeemTopic = 0;
+        for (uint256 i = 0;i < entries.length;i++) {
+            if (entries[i].topics[0] == redeemEventHash) {
+                redeemTopic = i;
+            }
+        }
+        return RedeemResults(
+            address(uint160(uint256(entries[redeemTopic].topics[1]))),
+            uint256(entries[redeemTopic].topics[2]),
+            uint256(entries[redeemTopic].topics[3])
+        );
     }
 
     function doStorm(uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
-        hoax(userAddress);
         vm.recordLogs();
         // Storm the castle
         kingOfTheDegen.stormTheCastle{value: minPlayAmount}(randomSeed, fid);
@@ -155,7 +222,10 @@ contract KingOfTheDegenTest is Test {
         )));
     }
 
-    function calculatePercentage(uint256 amount, KingOfTheDegen.CourtRole courtRole) public view returns (uint256) {
+    function getPercentageFromCourtRole(
+        uint256 amount,
+        KingOfTheDegen.CourtRole courtRole
+    ) public view returns (uint256) {
         uint256 bps = kingOfTheDegen.courtBps(courtRole);
         return (amount * bps) / 10_000;
     }

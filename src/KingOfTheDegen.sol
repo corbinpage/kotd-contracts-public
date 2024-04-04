@@ -40,7 +40,7 @@ contract KingOfTheDegen is Owned {
         uint256 indexed amountSent,
         uint256 fid
     );
-    event Redeemed(address indexed accountAddress, uint256 amountRedeemed);
+    event Redeemed(address indexed accountAddress, uint256 indexed amountRedeemed, uint256 indexed pointsRedeemed);
     // Custom Errors
     error BadZeroAddress();
     error GameNotActive(uint256 gameStartBlock, uint256 gameEndBlock, uint256 currentBlock);
@@ -103,7 +103,7 @@ contract KingOfTheDegen is Owned {
 
     function protocolRedeem() public onlyOwner {
         uint256 redeemEndedBlock = gameEndBlock() + redeemAfterGameEndedBlocks;
-        if (block.number <= redeemEndedBlock) revert RedeemStillActive(redeemEndedBlock);
+        if (block.number < redeemEndedBlock) revert RedeemStillActive(redeemEndedBlock);
         SafeTransferLib.safeTransferETH(msg.sender, address(this).balance);
     }
 
@@ -136,7 +136,7 @@ contract KingOfTheDegen is Owned {
     }
 
     function isGameEnded() public view returns (bool) {
-        return gameEndBlock() < block.number;
+        return gameEndBlock() <= block.number;
     }
 
     function isGameActive() public view returns (bool) {
@@ -144,7 +144,11 @@ contract KingOfTheDegen is Owned {
     }
 
     function gameEndBlock() public view returns (uint256) {
-        return gameStartBlock + (gameDurationBlocks - 1);
+        return gameStartBlock + gameDurationBlocks;
+    }
+
+    function gameLastBlock() public view returns (uint256) {
+        return gameEndBlock() - 1;
     }
 
     function totalAssets() public view returns (uint256) {
@@ -161,9 +165,9 @@ contract KingOfTheDegen is Owned {
         if (pointsBalance[msg.sender] == 0) revert NoNativeToSend();
         uint256 nativeToSend = convertPointsToNative(pointsBalance[msg.sender]);
         SafeTransferLib.safeTransferETH(msg.sender, nativeToSend);
+        emit Redeemed(msg.sender, nativeToSend, pointsBalance[msg.sender]);
         // Clear points balance
         pointsBalance[msg.sender] = 0;
-        emit Redeemed(msg.sender, nativeToSend);
     }
 
     function getTotalPoints() public view returns (uint256) {

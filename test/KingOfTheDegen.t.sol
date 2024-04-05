@@ -12,7 +12,6 @@ contract KingOfTheDegenTest is Test {
     uint256 public immutable altUserAddressKingSeed = 2;
     bytes32 public immutable stormEventHash = keccak256("StormTheCastle(address,uint8,uint256,uint256)");
     bytes32 public immutable redeemEventHash = keccak256("Redeemed(address,uint256,uint256)");
-
     // Settings
     uint256 public immutable gameDurationBlocks = 42300;
     uint256 public immutable minPlayAmount = 1e15;
@@ -121,38 +120,38 @@ contract KingOfTheDegenTest is Test {
 
     function test_FlowRates() public {
         StormResults memory stormResults = doStorm(userAddress, random(), 0);
-        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToNative(
+        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToDegen(
             kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks
         );
         // Fast forward to end of game
         vm.roll(kingOfTheDegen.gameEndBlock());
         assertEq(kingOfTheDegen.isGameEnded(), true);
-        uint256 balanceBefore = userAddress.balance;
+        uint256 balanceBefore = kingOfTheDegen.degenToken().balanceOf(userAddress);
         doRedeem(userAddress);
-        assertEq(balanceBefore + expectedUserAssets, userAddress.balance);
+        assertEq(balanceBefore + expectedUserAssets, kingOfTheDegen.degenToken().balanceOf(userAddress));
     }
 
     function test_King() public {
         StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
-        uint256 userBalanceBefore = userAddress.balance;
+        uint256 userBalanceBefore = kingOfTheDegen.degenToken().balanceOf(userAddress);
         assertEq(kingOfTheDegen.king(0), userAddress);
         // Fast forward 10_000 blocks
         vm.roll(block.number + 10000);
         StormResults memory altStormResults = doStorm(altUserAddress, altUserAddressKingSeed, 0);
-        uint256 altUserBalanceBefore = altUserAddress.balance;
+        uint256 altUserBalanceBefore = kingOfTheDegen.degenToken().balanceOf(altUserAddress);
         assertEq(kingOfTheDegen.king(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegen.gameEndBlock());
-        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToNative(
+        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToDegen(
             kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * 10000
         );
         doRedeem(userAddress);
-        assertEq(userBalanceBefore + expectedUserAssets, userAddress.balance);
-        uint256 expectedAltUserAssets = kingOfTheDegen.convertPointsToNative(
+        assertEq(userBalanceBefore + expectedUserAssets, kingOfTheDegen.degenToken().balanceOf(userAddress));
+        uint256 expectedAltUserAssets = kingOfTheDegen.convertPointsToDegen(
             kingOfTheDegen.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - 10000)
         );
         doRedeem(altUserAddress);
-        assertEq(altUserBalanceBefore + expectedAltUserAssets, altUserAddress.balance);
+        assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegen.degenToken().balanceOf(altUserAddress));
     }
 
     function doRedeem(address accountAddress) private returns (RedeemResults memory) {

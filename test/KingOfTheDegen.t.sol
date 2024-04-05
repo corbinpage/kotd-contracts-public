@@ -85,8 +85,7 @@ contract KingOfTheDegenTest is Test {
     }
 
     function test_StormTheCastleEvent() public {
-        hoax(userAddress);
-        StormResults memory stormResults = doStorm();
+        StormResults memory stormResults = doStorm(userAddress);
         // User Address
         assertEq(stormResults.accountAddress, userAddress);
         // Court Role
@@ -100,8 +99,7 @@ contract KingOfTheDegenTest is Test {
     }
 
     function test_ProtocolFees() public {
-        hoax(userAddress);
-        doStorm();
+        doStorm(userAddress);
         // Check protocol fee as native
         assertEq(kingOfTheDegen.protocolFeeBalance(), protocolFee);
         // Fast forward to end of game
@@ -122,51 +120,39 @@ contract KingOfTheDegenTest is Test {
     }
 
     function test_FlowRates() public {
-        hoax(userAddress);
-        StormResults memory stormResults = doStorm(random(), 0);
-        uint256 expectedAmount = getPercentageFromCourtRole(
-            kingOfTheDegen.totalAssets(),
-            stormResults.courtRole
+        StormResults memory stormResults = doStorm(userAddress, random(), 0);
+        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToNative(
+            kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks
         );
         // Fast forward to end of game
         vm.roll(kingOfTheDegen.gameEndBlock());
         assertEq(kingOfTheDegen.isGameEnded(), true);
         uint256 balanceBefore = userAddress.balance;
         doRedeem(userAddress);
-        assertEq(balanceBefore + expectedAmount, userAddress.balance);
+        assertEq(balanceBefore + expectedUserAssets, userAddress.balance);
     }
 
     function test_King() public {
-        hoax(userAddress);
-        uint256 origBlockNumber = block.number;
-        StormResults memory stormResults = doStorm(userAddressKingSeed, 0);
+        StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
         uint256 userBalanceBefore = userAddress.balance;
-        uint256 expectedUserPoints = kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * (gameDurationBlocks);
+        assertEq(kingOfTheDegen.king(0), userAddress);
         // Fast forward 10_000 blocks
-//        vm.roll(block.number + 10000);
-//        hoax(altUserAddress);
-//        StormResults memory altStormResults = doStorm(altUserAddressKingSeed, 0);
-//        console.log(kingOfTheDegen.totalAssets());
-//        uint256 altUserBalanceBefore = altUserAddress.balance;
-//        uint256 expectedAltUserPoints =
-//            kingOfTheDegen.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - 1001);
+        vm.roll(block.number + 10000);
+        StormResults memory altStormResults = doStorm(altUserAddress, altUserAddressKingSeed, 0);
+        uint256 altUserBalanceBefore = altUserAddress.balance;
+        assertEq(kingOfTheDegen.king(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegen.gameEndBlock());
-//        assertEq(kingOfTheDegen.king(0), altUserAddress);
-        RedeemResults memory redeemResults = doRedeem(userAddress);
-        console.logUint(expectedUserPoints);
-        console.logUint(redeemResults.pointsRedeemed);
-        console.logUint(kingOfTheDegen.convertPointsToNative(expectedUserPoints));
-        console.logUint(redeemResults.amountRedeemed);
-        //console.logUint(userAddress.balance - (userBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedUserPoints)));
-//        assertEq(
-//            userBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedUserPoints),
-//            userAddress.balance
-//        );
-//        assertEq(
-//            altUserBalanceBefore + kingOfTheDegen.convertPointsToNative(expectedAltUserPoints),
-//            userAddress.balance
-//        );
+        uint256 expectedUserAssets = kingOfTheDegen.convertPointsToNative(
+            kingOfTheDegen.getPointsPerBlock(stormResults.courtRole) * 10000
+        );
+        doRedeem(userAddress);
+        assertEq(userBalanceBefore + expectedUserAssets, userAddress.balance);
+        uint256 expectedAltUserAssets = kingOfTheDegen.convertPointsToNative(
+            kingOfTheDegen.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - 10000)
+        );
+        doRedeem(altUserAddress);
+        assertEq(altUserBalanceBefore + expectedAltUserAssets, altUserAddress.balance);
     }
 
     function doRedeem(address accountAddress) private returns (RedeemResults memory) {
@@ -189,9 +175,10 @@ contract KingOfTheDegenTest is Test {
         );
     }
 
-    function doStorm(uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
+    function doStorm(address accountAddress, uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
         vm.recordLogs();
         // Storm the castle
+        hoax(accountAddress);
         kingOfTheDegen.stormTheCastle{value: minPlayAmount}(randomSeed, fid);
         // Event
         Vm.Log[] memory entries = vm.getRecordedLogs();
@@ -210,8 +197,8 @@ contract KingOfTheDegenTest is Test {
         );
     }
 
-    function doStorm() private returns (StormResults memory) {
-        return doStorm(0, 0);
+    function doStorm(address accountAddress) private returns (StormResults memory) {
+        return doStorm(accountAddress, 0, 0);
     }
 
     function random() private view returns (uint256) {
@@ -220,14 +207,6 @@ contract KingOfTheDegenTest is Test {
             blockhash(block.number - 1),
             block.timestamp
         )));
-    }
-
-    function getPercentageFromCourtRole(
-        uint256 amount,
-        KingOfTheDegen.CourtRole courtRole
-    ) public view returns (uint256) {
-        uint256 bps = kingOfTheDegen.courtBps(courtRole);
-        return (amount * bps) / 10_000;
     }
 
     receive() external payable {}

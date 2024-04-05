@@ -20,6 +20,7 @@ contract KingOfTheDegen is Owned {
     uint256 public storms;
     uint256 public gameStartBlock;
     uint256 public protocolFeeBalance;
+    uint256 public gameAssets;
     // Court
     address[1] public king;
     address[2] public lords;
@@ -119,15 +120,17 @@ contract KingOfTheDegen is Owned {
             msg.sender,
             courtRoles[msg.sender]
         );
-        // Increment play count
-        storms++;
-        // Make sure account can only storm every stormFrequencyBlocks blocks
-        stormBlock[msg.sender] = block.number;
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, _randomSeed);
         confirmTheStorm(msg.sender, courtRole);
         // Add protocol fee to balance
         protocolFeeBalance += protocolFee;
+        // Add amount sent - protocolFee to gameAssets balance
+        gameAssets += msg.value - protocolFee;
+        // Increment play count
+        storms++;
+        // Make sure account can only storm every stormFrequencyBlocks blocks
+        stormBlock[msg.sender] = block.number;
         emit StormTheCastle(msg.sender, uint8(courtRole), msg.value, _fid);
     }
 
@@ -152,7 +155,11 @@ contract KingOfTheDegen is Owned {
     }
 
     function totalAssets() public view returns (uint256) {
-        return address(this).balance - protocolFeeBalance;
+        return gameAssets;
+    }
+
+    function assetBalance() public view returns (uint256) {
+        return address(this).balance;
     }
 
     function redeem() public {

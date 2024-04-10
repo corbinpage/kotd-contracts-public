@@ -13,3 +13,6 @@
 [submodule "lib/trustus"]
 	path = lib/trustus
 	url = https://github.com/zeframlou/trustus
+[submodule "lib/v3-periphery"]
+	path = lib/v3-periphery
+	url = https://github.com/Uniswap/v3-periphery

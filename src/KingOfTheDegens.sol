@@ -6,6 +6,8 @@ import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
 import {Trustus} from "trustus/Trustus.sol";
+import 'v3-periphery/interfaces/ISwapRouter.sol';
+import 'v3-periphery/libraries/TransferHelper.sol';
 
 contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable gameDurationBlocks;

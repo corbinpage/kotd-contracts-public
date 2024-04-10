@@ -43,3 +43,6 @@ To get the current king use `contract.king(0)`, current lords `contract.lords(0)
 
 ### Storm block
 You can get the last block that an address stormed the castle using `contract.stormBlock(address)`. The contract will not allow an address to storm more than once every 1800 blocks.
+
+### Deposit Degen
+You can add degen tokens (`0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed`) to the rewards pool by calling the `depositDegenToGameAssets(uint256 degenAmountWei)` method on the kingOfTheDegens contract. You will need to `approve` the `amountInWei` of degens tokens to the kingOfTheDegens contract address before calling this method. No protocol fee is taken.

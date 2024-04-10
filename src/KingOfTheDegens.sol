@@ -5,8 +5,9 @@ import {Owned} from "solmate/auth/Owned.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
+import {Trustus} from "trustus/Trustus.sol";
 
-contract KingOfTheDegen is Owned {
+contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable gameDurationBlocks;
     uint256 public immutable minPlayAmount;
     uint256 public immutable protocolFee;
@@ -14,6 +15,7 @@ contract KingOfTheDegen is Owned {
     uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
+    bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
@@ -40,7 +42,7 @@ contract KingOfTheDegen is Owned {
     event StormTheCastle(
         address indexed accountAddress,
         uint8 indexed courtRole,
-        uint256 indexed amountSent,
+        address indexed outAddress,
         uint256 fid
     );
     event Redeemed(address indexed accountAddress, uint256 indexed amountRedeemed, uint256 indexed pointsRedeemed);
@@ -110,7 +112,16 @@ contract KingOfTheDegen is Owned {
         SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToken.balanceOf(address(this)));
     }
 
-    function stormTheCastle(uint256 _randomSeed, uint256 _fid) public payable {
+    function setIsTrusted(address trustedAddress, bool isTrusted) public onlyOwner {
+        _setIsTrusted(trustedAddress, isTrusted);
+    }
+
+    function depositDegenToGameAssets(uint256 degenAmountWei) public {
+        gameAssets += degenAmountWei;
+        SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
+    }
+
+    function stormTheCastle(TrustusPacket calldata packet) public payable {
         if (msg.sender == address(0)) revert BadZeroAddress();
         if (!isGameActive()) revert GameNotActive(gameStartBlock, gameEndBlock(), block.number);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
@@ -122,21 +133,22 @@ contract KingOfTheDegen is Owned {
             msg.sender,
             courtRoles[msg.sender]
         );
-        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
-        // Convert to degen
-        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, msg.value - protocolFee);
+        uint256 randomSeed;
+        uint256 fid;
+        (randomSeed, fid) = abi.decode(packet.payload, (uint256,uint256));
+        uint256 degenAmount = convertEthToDegen(msg.value - protocolFee);
         // Determine courtRole
-        CourtRole courtRole = determineCourtRole(msg.sender, _randomSeed);
-        confirmTheStorm(msg.sender, courtRole);
+        CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
+        address outAddress = confirmTheStorm(msg.sender, courtRole);
         // Add protocol fee to balance
         protocolFeeBalance += protocolFee;
         // Add amount sent
-        gameAssets += (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+        gameAssets += degenAmount;
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks
         stormBlock[msg.sender] = block.number;
-        emit StormTheCastle(msg.sender, uint8(courtRole), msg.value, _fid);
+        emit StormTheCastle(msg.sender, uint8(courtRole), outAddress, fid);
     }
 
     function isGameStarted() public view returns (bool) {
@@ -164,18 +176,18 @@ contract KingOfTheDegen is Owned {
     }
 
     function assetBalance() public view returns (uint256) {
-        return address(this).balance;
+        return degenToken.balanceOf(address(this));
     }
 
     function redeem() public {
         if (isGameActive()) revert GameStillActive();
-        if (address(this).balance == 0) revert RedeemEnded();
+        if (assetBalance() == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None) {
             stopPointsFlow(msg.sender, courtRoles[msg.sender]);
         }
         if (pointsBalance[msg.sender] == 0) revert InsufficientBalance();
-        uint256 degenToSend = convertPointsToDegen(pointsBalance[msg.sender]);
+        uint256 degenToSend = convertPoints(pointsBalance[msg.sender]);
         SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToSend);
         emit Redeemed(msg.sender, degenToSend, pointsBalance[msg.sender]);
         // Clear points balance
@@ -212,27 +224,33 @@ contract KingOfTheDegen is Owned {
         }
     }
 
-    function confirmTheStorm(address accountAddress, CourtRole courtRole) private {
+    function confirmTheStorm(address accountAddress, CourtRole courtRole) private returns(address) {
+        address outAddress;
         // Switch flows
         if (courtRole == CourtRole.King) {
+            outAddress = king[0];
             switchFlows(king[0], accountAddress, CourtRole.King);
             king[0] = accountAddress;
         } else if (courtRole == CourtRole.Lord) {
+            outAddress = lords[0];
             switchFlows(lords[0], accountAddress,CourtRole.Lord);
             lords[0] = lords[1];
             lords[1] = accountAddress;
         } else if (courtRole == CourtRole.Knight) {
+            outAddress = knights[0];
             switchFlows(knights[0], accountAddress, CourtRole.Knight);
             knights[0] = knights[1];
             knights[1] = knights[2];
             knights[2] = accountAddress;
         } else {
+            outAddress = townsfolk[0];
             switchFlows(townsfolk[0], accountAddress, CourtRole.Townsfolk);
             townsfolk[0] = townsfolk[1];
             townsfolk[1] = townsfolk[2];
             townsfolk[2] = townsfolk[3];
             townsfolk[3] = accountAddress;
         }
+        return outAddress;
     }
 
     function switchFlows(address oldAddress, address newAddress, CourtRole courtRole) private {
@@ -240,6 +258,12 @@ contract KingOfTheDegen is Owned {
             stopPointsFlow(oldAddress, courtRole);
         }
         startPointsFlow(newAddress, courtRole);
+    }
+
+    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
+        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
+        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
+        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
     }
 
     function stopPointsFlow(address accountAddress, CourtRole courtRole) private {
@@ -273,7 +297,7 @@ contract KingOfTheDegen is Owned {
         return (endBlockNumber - roleStartBlock[accountAddress]) * getPointsPerBlock(courtRole);
     }
 
-    function convertPointsToDegen(uint256 points) public view returns (uint256) {
+    function convertPoints(uint256 points) public view returns (uint256) {
         // Ensure points is not too large to cause overflow
         assert(points <= type(uint256).max / 1e18);
         uint256 pointsAdjusted = points * 1e18;

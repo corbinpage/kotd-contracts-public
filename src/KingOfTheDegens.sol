@@ -6,8 +6,7 @@ import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
 import {Trustus} from "trustus/Trustus.sol";
-import 'v3-periphery/interfaces/ISwapRouter.sol';
-import 'v3-periphery/libraries/TransferHelper.sol';
+import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
 
 contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable gameDurationBlocks;
@@ -17,8 +16,8 @@ contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
+    address public immutable WETH = 0x4200000000000000000000000000000000000006;
     bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
-    ISwapRouter public immutable swapRouter;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
@@ -263,15 +262,27 @@ contract KingOfTheDegens is Owned, Trustus {
         startPointsFlow(newAddress, courtRole);
     }
 
-    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-        address
-    }
-
 //    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-//        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
-//        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
-//        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+//        IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
+//        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter
+//            .ExactInputSingleParams({
+//            tokenIn: WETH,
+//            tokenOut: address(degenToken),
+//            fee: 3000,
+//            recipient: address(this),
+//            amountIn: convertAmountWei,
+//            amountOutMinimum: 0,
+//            sqrtPriceLimitX96: 0
+//        });
+//
+//        return swapRouter02.exactInputSingle{value: convertAmountWei}(params);
 //    }
+
+    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
+        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
+        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
+        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+    }
 
     function stopPointsFlow(address accountAddress, CourtRole courtRole) private {
         if (courtRoles[accountAddress] != courtRole) revert CourtRoleMismatch(

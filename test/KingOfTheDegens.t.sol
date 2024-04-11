@@ -4,6 +4,8 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Trustus} from "trustus/Trustus.sol";
+import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
+import 'v3-periphery/contracts/libraries/OracleLibrary.sol';
 
 contract KingOfTheDegensTest is Test {
     KingOfTheDegens public kingOfTheDegens;
@@ -27,6 +29,8 @@ contract KingOfTheDegensTest is Test {
     address[2] public lords = [address(2), address(3)];
     address[3] public knights = [address(4), address(5), address(6)];
     address[4] public townsfolk = [address(7), address(8), address(9), address(10)];
+
+    uint32[] public secondsAgos;
 
     struct StormResults {
         address accountAddress;
@@ -190,6 +194,15 @@ contract KingOfTheDegensTest is Test {
     }
 
     function doStorm(address accountAddress, uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
+        IUniswapV3Pool pool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
+        int56[] memory tickCumulatives;
+        uint160[] memory secondsPerLiquidityCumulativeX128s;
+        secondsAgos.push(uint32(0));
+        (tickCumulatives, secondsPerLiquidityCumulativeX128s) = pool.observe(secondsAgos);
+        console.logInt(tickCumulatives[0]);
+        uint256 quoteAmount = OracleLibrary.getQuoteAtClick(int24(tickCumulatives[0]), uint128(minPlayAmount - protocolFee), kingOfTheDegens.WETH(), kingOfTheDegens.degenToken());
+        console.logUint(quoteAmount);
+        uint256 degenBalanceBefore = kingOfTheDegens.degenToken().balanceOf(address(kingOfTheDegens));
         Trustus.TrustusPacket memory trustusPacket = buildPacket(randomSeed, fid);
         vm.recordLogs();
         // Storm the castle
@@ -204,6 +217,9 @@ contract KingOfTheDegensTest is Test {
                 stormTopic = i;
             }
         }
+        uint256 amountOut = kingOfTheDegens.degenToken().balanceOf(address(kingOfTheDegens)) - degenBalanceBefore;
+        console.logUint(amountOut);
+        console.logUint(amountOut * uint256(int256(tickCumulatives[0])));
         return StormResults(
             address(uint160(uint256(entries[stormTopic].topics[1]))),
             KingOfTheDegens.CourtRole(uint8(uint256(entries[stormTopic].topics[2]))),

@@ -7,6 +7,7 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
 import {Trustus} from "trustus/Trustus.sol";
 import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
+import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
 contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable gameDurationBlocks;
@@ -17,6 +18,8 @@ contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
     address public immutable WETH = 0x4200000000000000000000000000000000000006;
+    IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
+    IUniswapV3Pool degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
@@ -262,26 +265,28 @@ contract KingOfTheDegens is Owned, Trustus {
         startPointsFlow(newAddress, courtRole);
     }
 
-//    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-//        IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
-//        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter
-//            .ExactInputSingleParams({
-//            tokenIn: WETH,
-//            tokenOut: address(degenToken),
-//            fee: 3000,
-//            recipient: address(this),
-//            amountIn: convertAmountWei,
-//            amountOutMinimum: 0,
-//            sqrtPriceLimitX96: 0
-//        });
-//
-//        return swapRouter02.exactInputSingle{value: convertAmountWei}(params);
-//    }
-
     function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
-        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
-        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+        (uint160 sqrtPriceX96,,,,,,) = degenPool.slot0();
+        uint256 ethToDegenSpotPrice = getPriceDegenToEth(sqrtPriceX96);
+        uint256 ethToDegenAmountOut = ethToDegenSpotPrice - (ethToDegenSpotPrice * 100 / 10_000);
+        uint256 amountOutMinimum = ethToDegenAmountOut * convertAmountWei;
+        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter
+            .ExactInputSingleParams({
+            tokenIn: WETH,
+            tokenOut: address(degenToken),
+            fee: 3000,
+            recipient: address(this),
+            amountIn: convertAmountWei,
+            amountOutMinimum: amountOutMinimum,
+            sqrtPriceLimitX96: 0
+        });
+
+        return swapRouter02.exactInputSingle{value: convertAmountWei}(params);
+    }
+
+    function getPriceDegenToEth(uint256 sqrtPriceX96) private pure returns (uint256 price) {
+        uint256 sqrtPriceAdjusted = sqrtPriceX96 / (2 ** 48);
+        return (sqrtPriceAdjusted * sqrtPriceAdjusted) / (2 ** 96);
     }
 
     function stopPointsFlow(address accountAddress, CourtRole courtRole) private {

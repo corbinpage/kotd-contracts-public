@@ -18,6 +18,7 @@ contract KingOfTheDegens is Owned, Trustus {
     uint256 public immutable totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
     bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
+    ISwapRouter public immutable swapRouter;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
@@ -263,10 +264,14 @@ contract KingOfTheDegens is Owned, Trustus {
     }
 
     function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
-        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
-        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+        address
     }
+
+//    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
+//        uint256 degenBalanceBefore = degenToken.balanceOf(address(this));
+//        SafeTransferLib.safeTransferETH(0xAF8E337173DcbCE012c309500B6dcB430f46C0D3, convertAmountWei);
+//        return (degenToken.balanceOf(address(this)) - degenBalanceBefore);
+//    }
 
     function stopPointsFlow(address accountAddress, CourtRole courtRole) private {
         if (courtRoles[accountAddress] != courtRole) revert CourtRoleMismatch(

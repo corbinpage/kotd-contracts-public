@@ -169,6 +169,15 @@ contract KingOfTheDegensTest is Test {
         assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegens.degenToken().balanceOf(altUserAddress));
     }
 
+    function test_PointsHelper() public {
+        doStorm(userAddress, userAddressKingSeed, 0);
+        uint256[10] memory courtPoints = kingOfTheDegens.getCourtMemberPoints();
+        assertEq(courtPoints[0], 0);
+        vm.roll(block.number + 10_000);
+        uint256[10] memory courtPointsAfter = kingOfTheDegens.getCourtMemberPoints();
+        assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
+    }
+
     function doRedeem(address accountAddress) private returns (RedeemResults memory) {
         vm.recordLogs();
         vm.prank(accountAddress);

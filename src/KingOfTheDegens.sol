@@ -25,7 +25,7 @@ contract KingOfTheDegens is Owned, Trustus {
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
     mapping(address => uint256) public pointsBalance;
-    mapping(address => uint256) private roleStartBlock;
+    mapping(address => uint256) public roleStartBlock;
     uint256 public storms;
     uint256 public gameStartBlock;
     uint256 public protocolFeeBalance;
@@ -314,7 +314,7 @@ contract KingOfTheDegens is Owned, Trustus {
         address accountAddress,
         uint256 endBlockNumber,
         CourtRole courtRole
-    ) private view returns (uint256) {
+    ) public view returns (uint256) {
         endBlockNumber = endBlockNumber > gameEndBlock() ? gameEndBlock() : endBlockNumber;
         if (roleStartBlock[accountAddress] == 0 || endBlockNumber <= roleStartBlock[accountAddress]) return 0;
         return (endBlockNumber - roleStartBlock[accountAddress]) * getPointsPerBlock(courtRole);
@@ -326,6 +326,46 @@ contract KingOfTheDegens is Owned, Trustus {
         uint256 pointsAdjusted = points * 1e18;
         uint256 percentage = pointsAdjusted / totalPoints();
         return (totalAssets() * percentage) / 1e18;
+    }
+
+    function getCourtMemberPoints() public view returns (uint256[10] memory) {
+        address[10] memory courtAddresses = getCourtAddresses();
+        uint256[10] memory points;
+        for (uint256 i = 0;i < courtAddresses.length;i++) {
+            points[i] = pointsBalance[courtAddresses[i]] + calculatePointsEarned(
+                courtAddresses[i],
+                block.number,
+                getCourtRoleFromAddressesIndex(i)
+            );
+        }
+        return points;
+    }
+
+    function getCourtAddresses() public view returns (address[10] memory) {
+        return [
+            king[0],
+            lords[0],
+            lords[1],
+            knights[0],
+            knights[1],
+            knights[2],
+            townsfolk[0],
+            townsfolk[1],
+            townsfolk[2],
+            townsfolk[3]
+        ];
+    }
+
+    function getCourtRoleFromAddressesIndex(uint256 index) public pure returns (CourtRole) {
+        if (index == 0) {
+            return CourtRole.King;
+        } else if (index < 3) {
+            return CourtRole.Lord;
+        } else if (index < 6) {
+            return CourtRole.Knight;
+        } else {
+            return CourtRole.Townsfolk;
+        }
     }
 
     receive() external payable {}

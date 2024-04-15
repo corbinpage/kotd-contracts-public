@@ -181,14 +181,14 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 randomSeed;
         uint256 fid;
         (randomSeed, fid) = abi.decode(packet.payload, (uint256,uint256));
-        //uint256 degenAmount = convertEthToDegen(msg.value - protocolFee);
+        uint256 degenAmount = convertEthToDegen(msg.value - protocolFee);
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
         address outAddress = confirmTheStorm(msg.sender, courtRole);
         // Add protocol fee to balance
         protocolFeeBalance += protocolFee;
         // Add amount sent
-        //gameAssets += degenAmount;
+        gameAssets += degenAmount;
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks

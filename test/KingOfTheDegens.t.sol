@@ -58,7 +58,8 @@ contract KingOfTheDegensTest is Test {
             king,
             lords,
             knights,
-            townsfolk
+            townsfolk,
+            0
         );
         // Set Trustus address
         kingOfTheDegens.setIsTrusted(trustedSignerAddress, true);
@@ -238,6 +239,39 @@ contract KingOfTheDegensTest is Test {
         assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Townsfolk), 5000);
     }
 
+    function test_TransferGameState() public {
+        StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
+        uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
+        assertEq(kingOfTheDegens.king(0), userAddress);
+        // Fast forward 10_000 blocks
+        vm.roll(block.number + 10000);
+        // Fork new contract
+        KingOfTheDegens newContract = deployNewContract();
+        address[] memory addresses = new address[](1);
+        addresses[0] = userAddress;
+        uint256[] memory points = new uint256[](1);
+        points[0] = kingOfTheDegens.pointsBalance(userAddress);
+        uint256[] memory stormBlocks = new uint256[](1);
+        stormBlocks[0] = kingOfTheDegens.stormBlock(userAddress);
+        newContract.initGameState(kingOfTheDegens.storms(), addresses, points, stormBlocks);
+        newContract.startGame(king, lords, knights, townsfolk, kingOfTheDegens.gameStartBlock());
+        assertEq(newContract.gameEndBlock(), kingOfTheDegens.gameEndBlock());
+        assertEq(newContract.pointsBalance(userAddress), kingOfTheDegens.pointsBalance(userAddress));
+        assertEq(newContract.stormBlock(userAddress), kingOfTheDegens.stormBlock(userAddress));
+        assertEq(newContract.storms(), kingOfTheDegens.storms());
+        assertEq(newContract.gameDurationBlocks(), kingOfTheDegens.gameDurationBlocks());
+        assertEq(newContract.minPlayAmount(), kingOfTheDegens.minPlayAmount());
+        assertEq(newContract.protocolFee(), kingOfTheDegens.protocolFee());
+        assertEq(newContract.stormFrequencyBlocks(), kingOfTheDegens.stormFrequencyBlocks());
+        // Transfer Game Assets
+        deal(address(newContract.degenToken()), userAddress, kingOfTheDegens.totalAssets());
+        vm.startPrank(userAddress);
+        newContract.degenToken().approve(address(newContract), kingOfTheDegens.totalAssets());
+        newContract.depositDegenToGameAssets(kingOfTheDegens.totalAssets());
+        vm.stopPrank();
+        assertEq(newContract.totalAssets(), kingOfTheDegens.totalAssets());
+    }
+
     function doRedeem(address accountAddress) private returns (RedeemResults memory) {
         vm.recordLogs();
         vm.prank(accountAddress);
@@ -283,6 +317,18 @@ contract KingOfTheDegensTest is Test {
 
     function doStorm(address accountAddress) private returns (StormResults memory) {
         return doStorm(accountAddress, 0, 0);
+    }
+
+    function deployNewContract() public returns (KingOfTheDegens) {
+        return new KingOfTheDegens(
+            gameDurationBlocks,
+            minPlayAmount,
+            protocolFee,
+            stormFrequencyBlocks,
+            redeemAfterGameEndedBlocks,
+            courtBps,
+            courtRolePercentages
+        );
     }
 
     function buildPacket(address accountAddress, uint256 randomSeed, uint256 fid) private view returns (Trustus.TrustusPacket memory) {

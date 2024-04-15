@@ -56,7 +56,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     // Custom Errors
     error BadZeroAddress();
     error GameNotActive(uint256 gameStartBlock, uint256 gameEndBlock, uint256 currentBlock);
-    error GameStillActive();
+    error GameIsActive();
     error RedeemStillActive(uint256 redeemEndedBlock);
     error RedeemEnded();
     error InsufficientFunds(uint256 valueSent);
@@ -66,6 +66,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error InsufficientBalance();
     error CourtRoleMismatch(address accountAddress, CourtRole courtRole, CourtRole expectedCourtRole);
     error BadCourtRolePercentages(uint8 percentageTotal);
+    error ArrayLengthMismatch(uint256 length1, uint256 length2);
 
     constructor(
         uint256 _gameDurationBlocks,
@@ -85,11 +86,28 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         _setRoleRanges(_courtRolePercentages);
     }
 
+    function initGameState(
+        uint256 _storms,
+        address[] memory _accountAddresses,
+        uint256[] memory _points,
+        uint256[] memory _stormBlocks
+    ) public onlyOwner {
+        if (isGameActive()) revert GameIsActive();
+        if (_accountAddresses.length != _points.length) revert ArrayLengthMismatch(_accountAddresses.length, _points.length);
+        if (_stormBlocks.length != _points.length) revert ArrayLengthMismatch(_stormBlocks.length, _points.length);
+        storms = _storms;
+        for (uint256 i = 0;i < _accountAddresses.length;i++) {
+            pointsBalance[_accountAddresses[i]] = _points[i];
+            stormBlock[_accountAddresses[i]] = _stormBlocks[i];
+        }
+    }
+
     function startGame(
         address[1] calldata _king,
         address[2] calldata _lords,
         address[3] calldata _knights,
-        address[4] calldata _townsfolk
+        address[4] calldata _townsfolk,
+        uint256 _startBlock
     ) public onlyOwner {
         // Starting court
         confirmTheStorm(_king[0], CourtRole.King);
@@ -103,12 +121,12 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         confirmTheStorm(_townsfolk[2], CourtRole.Townsfolk);
         confirmTheStorm(_townsfolk[3], CourtRole.Townsfolk);
         // Set starting block
-        gameStartBlock = block.number;
+        gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
     }
 
     function collectProtocolFees() public onlyOwner {
         if (protocolFeeBalance == 0) revert InsufficientBalance();
-        if (!isGameEnded()) revert GameStillActive();
+        if (!isGameEnded()) revert GameIsActive();
         SafeTransferLib.safeTransferETH(msg.sender, protocolFeeBalance);
         protocolFeeBalance = 0;
     }
@@ -163,14 +181,14 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 randomSeed;
         uint256 fid;
         (randomSeed, fid) = abi.decode(packet.payload, (uint256,uint256));
-        uint256 degenAmount = convertEthToDegen(msg.value - protocolFee);
+        //uint256 degenAmount = convertEthToDegen(msg.value - protocolFee);
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
         address outAddress = confirmTheStorm(msg.sender, courtRole);
         // Add protocol fee to balance
         protocolFeeBalance += protocolFee;
         // Add amount sent
-        gameAssets += degenAmount;
+        //gameAssets += degenAmount;
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks
@@ -203,7 +221,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function redeem() public whenNotPaused {
-        if (isGameActive()) revert GameStillActive();
+        if (isGameActive()) revert GameIsActive();
         if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None) {

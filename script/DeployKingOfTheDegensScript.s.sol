@@ -55,7 +55,7 @@ contract DeployKingOfTheDegensScript is Script {
         // Set Trustus address
         kingOfTheDegens.setIsTrusted(trustedSignerAddress, true);
         console.log("Trustus signer added: %s", trustedSignerAddress);
-        transferOwnership(newOwnerAddress);
+        //transferOwnership(newOwnerAddress);
         vm.stopBroadcast();
     }
 
@@ -64,7 +64,8 @@ contract DeployKingOfTheDegensScript is Script {
             king,
             lords,
             knights,
-            townsfolk
+            townsfolk,
+            0
         );
         console.log("Game started");
     }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {Owned} from "solmate/auth/Owned.sol";
+import {Pausable} from "openzeppelin/security/Pausable.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
@@ -9,11 +10,11 @@ import {Trustus} from "trustus/Trustus.sol";
 import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
 import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
-contract KingOfTheDegens is Owned, Trustus {
+contract KingOfTheDegens is Owned, Pausable, Trustus {
     uint256 public immutable gameDurationBlocks;
     uint256 public immutable minPlayAmount;
     uint256 public immutable protocolFee;
-    uint256 public immutable stormFrequencyBlocks;
+    uint256 public stormFrequencyBlocks;
     uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
@@ -43,6 +44,7 @@ contract KingOfTheDegens is Owned, Trustus {
         Knight,
         Townsfolk
     }
+    uint8[3] public roleRanges;
     // Events
     event StormTheCastle(
         address indexed accountAddress,
@@ -63,6 +65,7 @@ contract KingOfTheDegens is Owned, Trustus {
     error BadCourtRole(CourtRole courtRole);
     error InsufficientBalance();
     error CourtRoleMismatch(address accountAddress, CourtRole courtRole, CourtRole expectedCourtRole);
+    error BadCourtRolePercentages(uint8 percentageTotal);
 
     constructor(
         uint256 _gameDurationBlocks,
@@ -70,17 +73,16 @@ contract KingOfTheDegens is Owned, Trustus {
         uint256 _protocolFee,
         uint256 _stormFrequencyBlocks,
         uint256 _redeemAfterGameEndedBlocks,
-        uint256[4] memory _courtBps
+        uint256[4] memory _courtBps,
+        uint8[4] memory _courtRolePercentages
     ) Owned(msg.sender) {
         gameDurationBlocks = _gameDurationBlocks;
         minPlayAmount = _minPlayAmount;
         protocolFee = _protocolFee;
         stormFrequencyBlocks = _stormFrequencyBlocks;
         redeemAfterGameEndedBlocks = _redeemAfterGameEndedBlocks;
-        // Court Bps
-        for (uint256 i = 0;i < 4;i++) {
-            courtBps[CourtRole(i + 1)] = _courtBps[i];
-        }
+        _setCourtBps(_courtBps);
+        _setRoleRanges(_courtRolePercentages);
     }
 
     function startGame(
@@ -121,12 +123,32 @@ contract KingOfTheDegens is Owned, Trustus {
         _setIsTrusted(trustedAddress, isTrusted);
     }
 
+    function togglePause() public onlyOwner {
+        if (paused()) {
+            _unpause();
+        } else {
+            _pause();
+        }
+    }
+
+    function setStormFrequency(uint256 blocks) public onlyOwner {
+        stormFrequencyBlocks = blocks;
+    }
+
+    function setCourtRolePercentages(uint8[4] memory _courtRolePercentages) public onlyOwner {
+        _setRoleRanges(_courtRolePercentages);
+    }
+
+    function setCourtBps(uint256[4] memory _courtBps) public onlyOwner {
+        _setCourtBps(_courtBps);
+    }
+
     function depositDegenToGameAssets(uint256 degenAmountWei) public {
         gameAssets += degenAmountWei;
         SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
     }
 
-    function stormTheCastle(TrustusPacket calldata packet) public payable {
+    function stormTheCastle(TrustusPacket calldata packet) public payable verifyPacket(TRUSTUS_STORM, packet) whenNotPaused() {
         if (msg.sender == address(0)) revert BadZeroAddress();
         if (!isGameActive()) revert GameNotActive(gameStartBlock, gameEndBlock(), block.number);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
@@ -180,13 +202,9 @@ contract KingOfTheDegens is Owned, Trustus {
         return gameAssets;
     }
 
-    function assetBalance() public view returns (uint256) {
-        return degenToken.balanceOf(address(this));
-    }
-
-    function redeem() public {
+    function redeem() public whenNotPaused {
         if (isGameActive()) revert GameStillActive();
-        if (assetBalance() == 0) revert RedeemEnded();
+        if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None) {
             stopPointsFlow(msg.sender, courtRoles[msg.sender]);
@@ -208,23 +226,19 @@ contract KingOfTheDegens is Owned, Trustus {
         return (totalPointsPerBlock * bps / 10_000);
     }
 
-    function determineCourtRole(address accountAddress, uint256 _randomSeed) public pure returns (CourtRole) {
+    function determineCourtRole(address accountAddress, uint256 _randomSeed) public view returns (CourtRole) {
         uint256 random = Dice.rollDiceSet(
             1,
             100,
             uint256(keccak256(abi.encodePacked(accountAddress, _randomSeed)))
         );
-        if (random >= 1 && random <= 5) {
-            // 5%
+        if (random >= 1 && random <= roleRanges[0]) {
             return CourtRole.King;
-        } else if (random >= 6 && random <= 15) {
-            // 10%
+        } else if (random > roleRanges[0] && random <= roleRanges[1]) {
             return CourtRole.Lord;
-        } else if (random >= 16 && random <= 36) {
-            // 20%
+        } else if (random > roleRanges[1] && random <= roleRanges[2]) {
             return CourtRole.Knight;
         } else {
-            // 65%
             return CourtRole.Townsfolk;
         }
     }
@@ -365,6 +379,21 @@ contract KingOfTheDegens is Owned, Trustus {
             return CourtRole.Knight;
         } else {
             return CourtRole.Townsfolk;
+        }
+    }
+
+    function _setRoleRanges(uint8[4] memory _percentages) private {
+        uint8 total = _percentages[0] + _percentages[1] + _percentages[2] + _percentages[3];
+        if (total != 100) revert BadCourtRolePercentages(total);
+
+        roleRanges[0] = _percentages[0];
+        roleRanges[1] = roleRanges[0] + _percentages[1];
+        roleRanges[2] = roleRanges[1] + _percentages[2];
+    }
+
+    function _setCourtBps(uint256[4] memory _courtBps) private {
+        for (uint256 i = 0;i < 4;i++) {
+            courtBps[CourtRole(i + 1)] = _courtBps[i];
         }
     }
 

@@ -13,8 +13,8 @@ contract KingOfTheDegensTest is Test {
     uint256 public immutable altUserAddressKingSeed = 2;
     bytes32 public immutable stormEventHash = keccak256("StormTheCastle(address,uint8,address,uint256)");
     bytes32 public immutable redeemEventHash = keccak256("Redeemed(address,uint256,uint256)");
-    uint256 public immutable trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
-    address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
+    uint256 public trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
+    address public trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
     // Settings
     uint256 public immutable gameDurationBlocks = 42300;
     uint256 public immutable minPlayAmount = 1e15;
@@ -22,6 +22,7 @@ contract KingOfTheDegensTest is Test {
     uint256 public immutable stormFrequencyBlocks = 1800;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
     uint256[4] public courtBps = [3300, 1400, 700, 450];
+    uint8[4] public courtRolePercentages = [5, 10, 20, 65];
     // Starting Court
     address[1] public king = [address(1)];
     address[2] public lords = [address(2), address(3)];
@@ -49,7 +50,8 @@ contract KingOfTheDegensTest is Test {
             protocolFee,
             stormFrequencyBlocks,
             redeemAfterGameEndedBlocks,
-            courtBps
+            courtBps,
+            courtRolePercentages
         );
         // Init
         kingOfTheDegens.startGame(
@@ -178,6 +180,64 @@ contract KingOfTheDegensTest is Test {
         assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
     }
 
+    function testFail_StormTheCastleBadPacket() public {
+        doStorm(address(1010));
+    }
+
+    function testFail_PauseStorm() public {
+        kingOfTheDegens.togglePause();
+        doStorm(address(userAddress));
+    }
+
+    function testFail_PauseRedeem() public {
+        doStorm(userAddress, random(), 0);
+        // Fast forward to end of game
+        vm.roll(kingOfTheDegens.gameEndBlock());
+        kingOfTheDegens.togglePause();
+        doRedeem(userAddress);
+    }
+
+    function test_StormFrequency() public {
+        kingOfTheDegens.setStormFrequency(1);
+        doStorm(userAddress, userAddressKingSeed, 0);
+        vm.roll(block.number + 1);
+        doStorm(altUserAddress, altUserAddressKingSeed, 0);
+        vm.roll(block.number + 1);
+        doStorm(userAddress, userAddressKingSeed, 0);
+    }
+
+    function testFail_StormFrequency() public {
+        doStorm(userAddress, userAddressKingSeed, 0);
+        vm.roll(block.number + 1);
+        doStorm(altUserAddress, altUserAddressKingSeed, 0);
+        vm.roll(block.number + 1);
+        doStorm(userAddress, userAddressKingSeed, 0);
+    }
+
+    function test_SetCourtRolePercentages() public {
+        assertEq(kingOfTheDegens.roleRanges(0), courtRolePercentages[0]);
+        assertEq(kingOfTheDegens.roleRanges(1), courtRolePercentages[0] + courtRolePercentages[1]);
+        assertEq(kingOfTheDegens.roleRanges(2), courtRolePercentages[0] + courtRolePercentages[1] + courtRolePercentages[2]);
+        uint8[4] memory percentages = [2,3,5,90];
+        kingOfTheDegens.setCourtRolePercentages(percentages);
+        assertEq(kingOfTheDegens.roleRanges(0), 2);
+        assertEq(kingOfTheDegens.roleRanges(1), 5);
+        assertEq(kingOfTheDegens.roleRanges(2), 10);
+    }
+
+    function test_CourtBps() public {
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.King), courtBps[0]);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Lord), courtBps[1]);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Knight), courtBps[2]);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Townsfolk), courtBps[3]);
+        uint256[4] memory _courtBps = [uint256(2000), uint256(1500), uint256(1500), uint256(5000)];
+        kingOfTheDegens.setCourtBps(_courtBps);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.King), 2000);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Lord), 1500);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Knight), 1500);
+        assertEq(kingOfTheDegens.courtBps(KingOfTheDegens.CourtRole.Townsfolk), 5000);
+    }
+
     function doRedeem(address accountAddress) private returns (RedeemResults memory) {
         vm.recordLogs();
         vm.prank(accountAddress);
@@ -199,7 +259,7 @@ contract KingOfTheDegensTest is Test {
     }
 
     function doStorm(address accountAddress, uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
-        Trustus.TrustusPacket memory trustusPacket = buildPacket(randomSeed, fid);
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(accountAddress, randomSeed, fid);
         vm.recordLogs();
         // Storm the castle
         hoax(accountAddress);
@@ -225,7 +285,7 @@ contract KingOfTheDegensTest is Test {
         return doStorm(accountAddress, 0, 0);
     }
 
-    function buildPacket(uint256 randomSeed, uint256 fid) private view returns (Trustus.TrustusPacket memory) {
+    function buildPacket(address accountAddress, uint256 randomSeed, uint256 fid) private view returns (Trustus.TrustusPacket memory) {
         uint256 deadline = block.timestamp + 300; // 5 minutes
         bytes memory payload = abi.encode(randomSeed, fid);
         bytes32 digest = keccak256(
@@ -244,7 +304,8 @@ contract KingOfTheDegensTest is Test {
                 )
             )
         );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(trustedSignerPrivateKey, digest);
+        uint256 pk = accountAddress == address(1010) ? 1010 : trustedSignerPrivateKey;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
 
         return Trustus.TrustusPacket({
             v: v,

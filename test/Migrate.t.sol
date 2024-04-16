@@ -44,7 +44,7 @@ contract MigrateTest is Test {
 
     function test_InitGame() public {
         uint8 courtCount;
-        address[] memory degenUsers = vm.parseJsonAddressArray(vm.readFile('test/playerAddresses.json'), '');
+        address[] memory degenUsers = vm.parseJsonAddressArray(vm.readFile('script/playerAddresses.json'), '');
         uint256[] memory points = new uint256[](degenUsers.length);
         uint256[] memory stormBlocks = new uint256[](degenUsers.length);
         for (uint256 i = 0;i < degenUsers.length;i++) {
@@ -83,20 +83,5 @@ contract MigrateTest is Test {
         }
         return false;
     }
-
-//    function test_TransferGameState() public {
-
-//        newContract.startGame(king, lords, knights, townsfolk, kingOfTheDegens.gameStartBlock());
-
-//        // Transfer Game Assets
-//        deal(address(newContract.degenToken()), userAddress, kingOfTheDegens.totalAssets());
-//        vm.startPrank(userAddress);
-//        newContract.degenToken().approve(address(newContract), kingOfTheDegens.totalAssets());
-//        newContract.depositDegenToGameAssets(kingOfTheDegens.totalAssets());
-//        vm.stopPrank();
-//        assertEq(newContract.totalAssets(), kingOfTheDegens.totalAssets());
-//    }
-
-//        assertEq(newContract.gameEndBlock(), kingOfTheDegens.gameEndBlock());
 
 }

@@ -10,5 +10,5 @@ remappings = [
     "@uniswap/swap-router-contracts/contracts/=lib/swap-router-contracts/contracts/",
     "@prb/math/=lib/prb-math/"
 ]
-
+fs_permissions = [{ access = "read", path = "./"}]
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

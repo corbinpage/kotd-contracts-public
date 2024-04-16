@@ -13,3 +13,6 @@ docs/
 
 # Dotenv file
 .env
+
+script/playerAddresses.json
+script/startRoleBlock.json

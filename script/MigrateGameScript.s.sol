@@ -32,11 +32,14 @@ contract MigrateGameScript is Script {
             if (oldCourtIndex != 1010) {
                 courtCount++;
                 // Add points up to current block
-                _points += calculatePointsEarned(
+                uint256 addPoints = calculatePointsEarned(
                     roleStartBlocks[uint256(oldCourtIndex)],
                     block.number,
                     uint8(contractNew.getCourtRoleFromAddressesIndex(uint256(oldCourtIndex)))
                 );
+                console.log(degenUsers[i]);
+                console.log(addPoints);
+                _points += addPoints;
             }
             points[i] = _points;
             stormBlocks[i] = _stormBlock;

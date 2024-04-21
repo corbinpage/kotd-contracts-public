@@ -150,23 +150,25 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_King() public {
+        // Fast forward 10800 blocks so king role is easier
+        vm.roll(block.number + 10800);
         StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
         uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
         assertEq(kingOfTheDegens.king(0), userAddress);
         // Fast forward 10_000 blocks
-        vm.roll(block.number + 10000);
+        vm.roll(block.number + 10800);
         StormResults memory altStormResults = doStorm(altUserAddress, altUserAddressKingSeed, 0);
         uint256 altUserBalanceBefore = kingOfTheDegens.degenToken().balanceOf(altUserAddress);
         assertEq(kingOfTheDegens.king(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         uint256 expectedUserAssets = kingOfTheDegens.convertPoints(
-            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * 10000
+            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * 10800
         );
         doRedeem(userAddress);
         assertEq(userBalanceBefore + expectedUserAssets, kingOfTheDegens.degenToken().balanceOf(userAddress));
         uint256 expectedAltUserAssets = kingOfTheDegens.convertPoints(
-            kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - 10000)
+            kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - (10800 * 2))
         );
         doRedeem(altUserAddress);
         assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegens.degenToken().balanceOf(altUserAddress));
@@ -199,11 +201,13 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_StormFrequency() public {
+        // Fast forward 10800 blocks so king role is easier
+        vm.roll(block.number + 10800);
         kingOfTheDegens.setStormFrequency(1);
         doStorm(userAddress, userAddressKingSeed, 0);
-        vm.roll(block.number + 1);
+        vm.roll(block.number + 10800);
         doStorm(altUserAddress, altUserAddressKingSeed, 0);
-        vm.roll(block.number + 1);
+        vm.roll(block.number + 10800);
         doStorm(userAddress, userAddressKingSeed, 0);
     }
 
@@ -213,6 +217,17 @@ contract KingOfTheDegensTest is Test {
         doStorm(altUserAddress, altUserAddressKingSeed, 0);
         vm.roll(block.number + 1);
         doStorm(userAddress, userAddressKingSeed, 0);
+    }
+
+    function test_KingProtection() public {
+        // Fast forward 10800 blocks so king role is easier
+        vm.roll(block.number + 10800);
+        // Crown New King
+        doStorm(userAddress, userAddressKingSeed, 0);
+        for (uint256 i = 1;i <= 5;i++) {
+            assertEq(kingOfTheDegens.getKingRange(), i);
+            vm.roll(block.number + 2700);
+        }
     }
 
     function test_SetCourtRolePercentages() public {

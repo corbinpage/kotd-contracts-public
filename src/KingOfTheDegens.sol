@@ -22,6 +22,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
     IUniswapV3Pool degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
+    uint256 public immutable kingProtectionBlocks = 10800;
     mapping(CourtRole => uint256) public courtBps;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
@@ -250,9 +251,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             100,
             uint256(keccak256(abi.encodePacked(accountAddress, _randomSeed)))
         );
-        if (random >= 1 && random <= roleRanges[0]) {
+        uint256 kingRange = getKingRange();
+        if (random >= 1 && random <= kingRange) {
             return CourtRole.King;
-        } else if (random > roleRanges[0] && random <= roleRanges[1]) {
+        } else if (random > kingRange && random <= roleRanges[1]) {
             return CourtRole.Lord;
         } else if (random > roleRanges[1] && random <= roleRanges[2]) {
             return CourtRole.Knight;
@@ -340,6 +342,20 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         courtRoles[accountAddress] = courtRole;
         // Update roleStartBlock
         roleStartBlock[accountAddress] = block.number;
+    }
+
+    function getKingRange() public view returns (uint8) {
+        uint256 kingBlock = roleStartBlock[king[0]];
+        uint256 endBlock = kingBlock + kingProtectionBlocks;
+        uint8 startValue = uint8(1);
+        uint8 endValue = roleRanges[0];
+        if (block.number >= endBlock) {
+            return endValue;
+        } else if (block.number <= kingBlock) {
+            return startValue;
+        } else {
+            return uint8(startValue + ((endValue - 1) * (block.number - kingBlock) / kingProtectionBlocks));
+        }
     }
 
     function calculatePointsEarned(

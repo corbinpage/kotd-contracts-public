@@ -13,8 +13,8 @@ contract DeployKingOfTheDegensScript is Script {
     uint256 public immutable protocolFee = 1e14;
     uint256 public immutable stormFrequencyBlocks = 1;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
-    uint256[4] public courtBps = [3300, 1400, 700, 450];
-    uint8[4] public courtRolePercentages = [5, 10, 20, 65];
+    uint256[5] public courtRolePointAllocation = [3300, 1400, 700, 450, 0];
+    uint256[4] public courtRoleOdds = [500, 1000, 2000, 6500];
     uint256 public immutable trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
     address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
 //    address public immutable newOwnerAddress = 0x6Ca74A32F864918a7399d37592438A80Ec7Ec8D9;
@@ -47,8 +47,8 @@ contract DeployKingOfTheDegensScript is Script {
             protocolFee,
             stormFrequencyBlocks,
             redeemAfterGameEndedBlocks,
-            courtBps,
-            courtRolePercentages
+            courtRolePointAllocation,
+            courtRoleOdds
         );
         console.log("KingOfTheDegens Game deployed to: %s", address(kingOfTheDegens));
         //startGame();

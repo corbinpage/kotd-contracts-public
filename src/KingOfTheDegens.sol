@@ -22,8 +22,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
     IUniswapV3Pool degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     bytes32 public immutable TRUSTUS_STORM = 0xeb8042f25b217795f608170833efd195ff101fb452e6483bf545403bf6d8f49b;
-    uint256 public immutable kingProtectionBlocks = 10800;
-    mapping(CourtRole => uint256) public courtBps;
+    mapping(CourtRole => uint256) public courtRolePointAllocation;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
     mapping(address => uint256) public pointsBalance;
@@ -37,15 +36,17 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     address[2] public lords;
     address[3] public knights;
     address[4] public townsfolk;
+    address[3] public custom;
     // Role
     enum CourtRole {
         None,
         King,
         Lord,
         Knight,
-        Townsfolk
+        Townsfolk,
+        Custom
     }
-    uint8[3] public roleRanges;
+    uint256[3] public courtRoleOddsCeilings;
     // Events
     event StormTheCastle(
         address indexed accountAddress,
@@ -58,7 +59,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error BadZeroAddress();
     error GameNotActive(uint256 gameStartBlock, uint256 gameEndBlock, uint256 currentBlock);
     error GameIsActive();
-    error RedeemStillActive(uint256 redeemEndedBlock);
+    error RedeemStillActive();
     error RedeemEnded();
     error InsufficientFunds(uint256 valueSent);
     error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber);
@@ -66,7 +67,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error BadCourtRole(CourtRole courtRole);
     error InsufficientBalance();
     error CourtRoleMismatch(address accountAddress, CourtRole courtRole, CourtRole expectedCourtRole);
-    error BadCourtRolePercentages(uint8 percentageTotal);
+    error BadCourtRoleOdds(uint256 percentageTotal);
+    error RequiresCourtRole(CourtRole courtRole);
     error ArrayLengthMismatch(uint256 length1, uint256 length2);
 
     constructor(
@@ -75,16 +77,16 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 _protocolFee,
         uint256 _stormFrequencyBlocks,
         uint256 _redeemAfterGameEndedBlocks,
-        uint256[4] memory _courtBps,
-        uint8[4] memory _courtRolePercentages
+        uint256[5] memory _courtRolePointAllocation,
+        uint256[4] memory _courtRoleOdds
     ) Owned(msg.sender) {
         gameDurationBlocks = _gameDurationBlocks;
         minPlayAmount = _minPlayAmount;
         protocolFee = _protocolFee;
         stormFrequencyBlocks = _stormFrequencyBlocks;
         redeemAfterGameEndedBlocks = _redeemAfterGameEndedBlocks;
-        _setCourtBps(_courtBps);
-        _setRoleRanges(_courtRolePercentages);
+        _setCourtRolePointAllocation(_courtRolePointAllocation);
+        _setCourtRoleOddsCeilings(_courtRoleOdds);
     }
 
     function initGameState(
@@ -133,8 +135,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function protocolRedeem() public onlyOwner {
-        uint256 redeemEndedBlock = gameEndBlock() + redeemAfterGameEndedBlocks;
-        if (block.number < redeemEndedBlock) revert RedeemStillActive(redeemEndedBlock);
+        if (!_hasRedeemEnded()) revert RedeemStillActive();
         SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToken.balanceOf(address(this)));
     }
 
@@ -154,12 +155,12 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         stormFrequencyBlocks = blocks;
     }
 
-    function setCourtRolePercentages(uint8[4] memory _courtRolePercentages) public onlyOwner {
-        _setRoleRanges(_courtRolePercentages);
+    function setCourtRoleOdds(uint256[4] memory _courtRoleOdds) public onlyOwner {
+        _setCourtRoleOddsCeilings(_courtRoleOdds);
     }
 
-    function setCourtBps(uint256[4] memory _courtBps) public onlyOwner {
-        _setCourtBps(_courtBps);
+    function setCourtRolePointAllocation(uint256[5] memory _courtRolePointAllocation) public onlyOwner {
+        _setCourtRolePointAllocation(_courtRolePointAllocation);
     }
 
     function depositDegenToGameAssets(uint256 degenAmountWei) public {
@@ -167,7 +168,9 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
     }
 
-    function stormTheCastle(TrustusPacket calldata packet) public payable verifyPacket(TRUSTUS_STORM, packet) whenNotPaused() {
+    function stormTheCastle(
+        TrustusPacket calldata packet
+    ) public payable verifyPacket(TRUSTUS_STORM, packet) whenNotPaused() {
         if (msg.sender == address(0)) revert BadZeroAddress();
         if (!isGameActive()) revert GameNotActive(gameStartBlock, gameEndBlock(), block.number);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
@@ -197,6 +200,21 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         emit StormTheCastle(msg.sender, uint8(courtRole), outAddress, fid);
     }
 
+    // KING
+    function setJesterRole(
+        TrustusPacket calldata packet
+    ) public payable verifyPacket(TRUSTUS_STORM, packet) whenNotPaused() {
+        if (msg.sender != king[0]) revert RequiresCourtRole(CourtRole.King);
+        if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
+        address jesterAddress;
+        uint256 fid;
+        (jesterAddress, fid) = abi.decode(packet.payload, (address,uint256));
+        // Check if jester is already in game
+        if (courtRoles[jesterAddress] != CourtRole.None) {
+
+        }
+    }
+
     function isGameStarted() public view returns (bool) {
         return gameStartBlock <= block.number;
     }
@@ -223,6 +241,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     function redeem() public whenNotPaused {
         if (isGameActive()) revert GameIsActive();
+        if (_hasRedeemEnded()) revert RedeemEnded();
         if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None) {
@@ -241,22 +260,22 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function getPointsPerBlock(CourtRole courtRole) public view returns (uint256) {
-        uint256 bps = courtBps[courtRole];
-        return (totalPointsPerBlock * bps / 10_000);
+        uint256 pointAllocation = courtRolePointAllocation[courtRole];
+        return (totalPointsPerBlock * pointAllocation / 10_000);
     }
 
     function determineCourtRole(address accountAddress, uint256 _randomSeed) public view returns (CourtRole) {
         uint256 random = Dice.rollDiceSet(
             1,
-            100,
+            10_000,
             uint256(keccak256(abi.encodePacked(accountAddress, _randomSeed)))
         );
         uint256 kingRange = getKingRange();
         if (random >= 1 && random <= kingRange) {
             return CourtRole.King;
-        } else if (random > kingRange && random <= roleRanges[1]) {
+        } else if (random > kingRange && random <= courtRoleOddsCeilings[1]) {
             return CourtRole.Lord;
-        } else if (random > roleRanges[1] && random <= roleRanges[2]) {
+        } else if (random > courtRoleOddsCeilings[1] && random <= courtRoleOddsCeilings[2]) {
             return CourtRole.Knight;
         } else {
             return CourtRole.Townsfolk;
@@ -264,31 +283,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function confirmTheStorm(address accountAddress, CourtRole courtRole) private returns(address) {
-        address outAddress;
-        // Switch flows
-        if (courtRole == CourtRole.King) {
-            outAddress = king[0];
-            switchFlows(king[0], accountAddress, CourtRole.King);
-            king[0] = accountAddress;
-        } else if (courtRole == CourtRole.Lord) {
-            outAddress = lords[0];
-            switchFlows(lords[0], accountAddress,CourtRole.Lord);
-            lords[0] = lords[1];
-            lords[1] = accountAddress;
-        } else if (courtRole == CourtRole.Knight) {
-            outAddress = knights[0];
-            switchFlows(knights[0], accountAddress, CourtRole.Knight);
-            knights[0] = knights[1];
-            knights[1] = knights[2];
-            knights[2] = accountAddress;
-        } else {
-            outAddress = townsfolk[0];
-            switchFlows(townsfolk[0], accountAddress, CourtRole.Townsfolk);
-            townsfolk[0] = townsfolk[1];
-            townsfolk[1] = townsfolk[2];
-            townsfolk[2] = townsfolk[3];
-            townsfolk[3] = accountAddress;
-        }
+        address outAddress = _addToCourt(accountAddress, courtRole);
+        switchFlows(outAddress, accountAddress, CourtRole.King);
         return outAddress;
     }
 
@@ -344,17 +340,18 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         roleStartBlock[accountAddress] = block.number;
     }
 
-    function getKingRange() public view returns (uint8) {
+    function getKingRange() public view returns (uint256) {
+        uint256 kingProtectionBlocks = 10800;
         uint256 kingBlock = roleStartBlock[king[0]];
         uint256 endBlock = kingBlock + kingProtectionBlocks;
-        uint8 startValue = uint8(1);
-        uint8 endValue = roleRanges[0];
+        uint256 startValue = 100;
+        uint256 endValue = courtRoleOddsCeilings[0];
         if (block.number >= endBlock) {
             return endValue;
         } else if (block.number <= kingBlock) {
             return startValue;
         } else {
-            return uint8(startValue + ((endValue - 1) * (block.number - kingBlock) / kingProtectionBlocks));
+            return uint256(startValue + ((endValue - startValue) * (block.number - kingBlock)) / kingProtectionBlocks);
         }
     }
 
@@ -376,9 +373,9 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return (totalAssets() * percentage) / 1e18;
     }
 
-    function getCourtMemberPoints() public view returns (uint256[10] memory) {
-        address[10] memory courtAddresses = getCourtAddresses();
-        uint256[10] memory points;
+    function getCourtMemberPoints() public view returns (uint256[13] memory) {
+        address[13] memory courtAddresses = getCourtAddresses();
+        uint256[13] memory points;
         for (uint256 i = 0;i < courtAddresses.length;i++) {
             points[i] = pointsBalance[courtAddresses[i]] + calculatePointsEarned(
                 courtAddresses[i],
@@ -389,7 +386,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return points;
     }
 
-    function getCourtAddresses() public view returns (address[10] memory) {
+    function getCourtAddresses() public view returns (address[13] memory) {
         return [
             king[0],
             lords[0],
@@ -400,7 +397,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             townsfolk[0],
             townsfolk[1],
             townsfolk[2],
-            townsfolk[3]
+            townsfolk[3],
+            custom[0],
+            custom[1],
+            custom[2]
         ];
     }
 
@@ -411,24 +411,81 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             return CourtRole.Lord;
         } else if (index < 6) {
             return CourtRole.Knight;
-        } else {
+        } else if (index < 10) {
             return CourtRole.Townsfolk;
+        } else {
+            return CourtRole.Custom;
         }
     }
 
-    function _setRoleRanges(uint8[4] memory _percentages) private {
-        uint8 total = _percentages[0] + _percentages[1] + _percentages[2] + _percentages[3];
-        if (total != 100) revert BadCourtRolePercentages(total);
-
-        roleRanges[0] = _percentages[0];
-        roleRanges[1] = roleRanges[0] + _percentages[1];
-        roleRanges[2] = roleRanges[1] + _percentages[2];
+    function findCourtRole(
+        address accountAddress,
+        KingOfTheDegens.CourtRole desiredCourtRole
+    ) public view returns (uint256) {
+        for (uint256 i = 1;i <= 30_000;i++) {
+            CourtRole rolledRole = determineCourtRole(accountAddress, i);
+            if (rolledRole == desiredCourtRole) {
+                return i;
+            }
+        }
+        return 0;
     }
 
-    function _setCourtBps(uint256[4] memory _courtBps) private {
-        for (uint256 i = 0;i < 4;i++) {
-            courtBps[CourtRole(i + 1)] = _courtBps[i];
+    function _setCourtRoleOddsCeilings(uint256[4] memory _courtRoleOdds) private {
+        uint256 total = _courtRoleOdds[0] + _courtRoleOdds[1] + _courtRoleOdds[2] + _courtRoleOdds[3];
+        if (total != 10_000) revert BadCourtRoleOdds(total);
+
+        courtRoleOddsCeilings[0] = _courtRoleOdds[0];
+        courtRoleOddsCeilings[1] = courtRoleOddsCeilings[0] + _courtRoleOdds[1];
+        courtRoleOddsCeilings[2] = courtRoleOddsCeilings[1] + _courtRoleOdds[2];
+    }
+
+    function _setCourtRolePointAllocation(uint256[5] memory _courtRolePointAllocation) private {
+        for (uint256 i = 0;i < _courtRolePointAllocation.length;i++) {
+            courtRolePointAllocation[CourtRole(i + 1)] = _courtRolePointAllocation[i];
         }
+    }
+
+    function _hasRedeemEnded() private view returns (bool) {
+        uint256 redeemEndedBlock = gameEndBlock() + redeemAfterGameEndedBlocks;
+        return block.number >= redeemEndedBlock;
+    }
+
+    function _swapUserCourtRoles(address[2] memory swapAddress, CourtRole[2] memory destinationCourtRole) private {
+        stopPointsFlow(swapAddress[0], courtRoles[swapAddress[0]]);
+        stopPointsFlow(swapAddress[1], courtRoles[swapAddress[1]]);
+        startPointsFlow(swapAddress[0], destinationCourtRole[0]);
+        startPointsFlow(swapAddress[1], destinationCourtRole[1]);
+
+    }
+
+    function _addToCourt(address accountAddress, CourtRole courtRole) private returns (address) {
+        address outAddress;
+        // Switch flows
+        if (courtRole == CourtRole.King) {
+            outAddress = king[0];
+            king[0] = accountAddress;
+        } else if (courtRole == CourtRole.Lord) {
+            outAddress = lords[0];
+            lords[0] = lords[1];
+            lords[1] = accountAddress;
+        } else if (courtRole == CourtRole.Knight) {
+            outAddress = knights[0];
+            knights[0] = knights[1];
+            knights[1] = knights[2];
+            knights[2] = accountAddress;
+        } else if (courtRole == CourtRole.Townsfolk) {
+            outAddress = townsfolk[0];
+            townsfolk[0] = townsfolk[1];
+            townsfolk[1] = townsfolk[2];
+            townsfolk[2] = townsfolk[3];
+            townsfolk[3] = accountAddress;
+        } else {
+            // Jester for now
+            outAddress = custom[0];
+            custom[0] = accountAddress;
+        }
+        return outAddress;
     }
 
     receive() external payable {}

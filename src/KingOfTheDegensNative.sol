@@ -7,20 +7,14 @@ import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
 import {Dice} from "./lib/Dice.sol";
 import {Trustus} from "trustus/Trustus.sol";
-import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
-import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
-contract KingOfTheDegens is Owned, Pausable, Trustus {
+contract KingOfTheDegensNative is Owned, Pausable, Trustus {
     uint256 public gameDurationBlocks;
     uint256 public minPlayAmount;
     uint256 public immutable protocolFee;
     uint256 public stormFrequencyBlocks;
     uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
-    ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
-    address public immutable WETH = 0x4200000000000000000000000000000000000006;
-    IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
-    IUniswapV3Pool degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     mapping(CourtRole => uint256) public courtRolePointAllocation;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
@@ -28,6 +22,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     mapping(address => uint256) public roleStartBlock;
     uint256 public storms;
     uint256 public gameStartBlock;
+    uint256 public protocolFeeBalance;
     uint256 public gameAssets;
     uint256 public kingProtectionBlocks = 10_800;
     // Court
@@ -128,22 +123,17 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     function redeem() public whenNotPaused {
         if (isGameActive()) revert GameIsActive();
         if (_hasRedeemEnded()) revert RedeemEnded();
-        if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
+        if (address(this).balance == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None && roleStartBlock[msg.sender] < gameEndBlock()) {
             updatePointsBalance(msg.sender);
         }
         if (pointsBalance[msg.sender] == 0) revert InsufficientBalance();
-        uint256 degenToSend = convertPointsToAssets(pointsBalance[msg.sender]);
-        SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToSend);
-        emit Redeemed(msg.sender, degenToSend, pointsBalance[msg.sender]);
+        uint256 nativeToSend = convertPointsToAssets(pointsBalance[msg.sender]);
+        SafeTransferLib.safeTransferETH(msg.sender, nativeToSend);
+        emit Redeemed(msg.sender, nativeToSend, pointsBalance[msg.sender]);
         // Clear points balance
         pointsBalance[msg.sender] = 0;
-    }
-
-    function depositDegenToGameAssets(uint256 degenAmountWei) public {
-        gameAssets += degenAmountWei;
-        SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
     }
 
     // Court Role Specific Public Methods
@@ -317,8 +307,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     // Private Methods
 
     function depositToTreasury(uint256 nativeIn) private {
-        uint256 degenAmount = convertEthToDegen(nativeIn - protocolFee);
-        gameAssets += degenAmount;
+        gameAssets += (nativeIn - protocolFee);
+        protocolFeeBalance += protocolFee;
     }
 
     function replaceRole(address accountAddress, CourtRole courtRole) private returns(address) {
@@ -349,26 +339,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     function updateCourtRole(address accountAddress, CourtRole courtRole) private {
         courtRoles[accountAddress] = courtRole;
-    }
-
-    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
-        (uint160 sqrtPriceX96,,,,,,) = degenPool.slot0();
-        uint256 sqrtPriceAdjusted = sqrtPriceX96 / (2 ** 48);
-        uint256 ethToDegenSpotPrice = (sqrtPriceAdjusted * sqrtPriceAdjusted) / (2 ** 96);
-        uint256 ethToDegenAmountOut = ethToDegenSpotPrice - (ethToDegenSpotPrice * 100 / 10_000);
-        uint256 amountOutMinimum = ethToDegenAmountOut * convertAmountWei;
-        IV3SwapRouter.ExactInputSingleParams memory params = IV3SwapRouter
-            .ExactInputSingleParams({
-            tokenIn: WETH,
-            tokenOut: address(degenToken),
-            fee: 3000,
-            recipient: address(this),
-            amountIn: convertAmountWei,
-            amountOutMinimum: amountOutMinimum,
-            sqrtPriceLimitX96: 0
-        });
-
-        return swapRouter02.exactInputSingle{value: convertAmountWei}(params);
     }
 
     function _setCourtRoleOddsCeilings(uint256[4] memory _courtRoleOdds) private {
@@ -435,22 +405,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     // Only Owner
 
-    function initGameState(
-        uint256 _storms,
-        address[] memory _accountAddresses,
-        uint256[] memory _points,
-        uint256[] memory _stormBlocks
-    ) public onlyOwner {
-        if (isGameActive()) revert GameIsActive();
-        if (_accountAddresses.length != _points.length) revert ArrayLengthMismatch(_accountAddresses.length, _points.length);
-        if (_stormBlocks.length != _points.length) revert ArrayLengthMismatch(_stormBlocks.length, _points.length);
-        storms = _storms;
-        for (uint256 i = 0;i < _accountAddresses.length;i++) {
-            pointsBalance[_accountAddresses[i]] = _points[i];
-            stormBlock[_accountAddresses[i]] = _stormBlocks[i];
-        }
-    }
-
     function startGame(
         address[1] calldata _king,
         address[2] calldata _lords,
@@ -474,14 +428,15 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function collectProtocolFees() public onlyOwner {
-        if (address(this).balance == 0) revert InsufficientBalance();
+        if (protocolFeeBalance == 0) revert InsufficientBalance();
         if (!isGameEnded()) revert GameIsActive();
-        SafeTransferLib.safeTransferETH(msg.sender, address(this).balance);
+        SafeTransferLib.safeTransferETH(msg.sender, protocolFeeBalance);
+        protocolFeeBalance = 0;
     }
 
     function protocolRedeem() public onlyOwner {
         if (!_hasRedeemEnded()) revert RedeemStillActive();
-        SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToken.balanceOf(address(this)));
+        SafeTransferLib.safeTransferETH(owner, address(this).balance);
     }
 
     function setIsTrusted(address trustedAddress, bool isTrusted) public onlyOwner {
@@ -516,5 +471,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         _setCourtRolePointAllocation(_courtRolePointAllocation);
     }
 
-    receive() external payable {}
+    receive() external payable {
+        gameAssets += msg.value;
+    }
 }

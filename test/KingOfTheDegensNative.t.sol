@@ -2,11 +2,11 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
+import {KingOfTheDegensNative} from "../src/KingOfTheDegensNative.sol";
 import {Trustus} from "trustus/Trustus.sol";
 
 contract KingOfTheDegensTest is Test {
-    KingOfTheDegens public kingOfTheDegens;
+    KingOfTheDegensNative public kingOfTheDegens;
     address public immutable userAddress = address(12345);
     uint256 public immutable userAddressKingSeed = 4;
     uint256 public immutable userAddressLordSeed = 8;
@@ -32,7 +32,7 @@ contract KingOfTheDegensTest is Test {
 
     struct StormResults {
         address accountAddress;
-        KingOfTheDegens.CourtRole courtRole;
+        KingOfTheDegensNative.CourtRole courtRole;
         address outAddress;
         uint256 fid;
     }
@@ -52,7 +52,7 @@ contract KingOfTheDegensTest is Test {
 
     function setUp() public {
         // Deploy
-        kingOfTheDegens = new KingOfTheDegens(
+        kingOfTheDegens = new KingOfTheDegensNative(
             gameDurationBlocks,
             minPlayAmount,
             protocolFee,
@@ -116,14 +116,14 @@ contract KingOfTheDegensTest is Test {
     function test_ProtocolFees() public {
         doStorm(userAddress);
         // Check protocol fee as native
-        assertEq(address(kingOfTheDegens).balance, protocolFee);
+        assertEq(kingOfTheDegens.protocolFeeBalance(), protocolFee);
         // Fast forward to end of game
         vm.roll(block.number + gameDurationBlocks);
         // Collect protocol fees
         uint256 ownerBalanceBeforeProtocol = address(this).balance;
         kingOfTheDegens.collectProtocolFees();
         assertEq(address(this).balance, ownerBalanceBeforeProtocol + protocolFee);
-        assertEq(address(kingOfTheDegens).balance, 0);
+        assertEq(kingOfTheDegens.protocolFeeBalance(), 0);
         // Fast forward to end of redeem
         vm.roll(block.number + redeemAfterGameEndedBlocks);
         // Protocol redeem
@@ -134,16 +134,6 @@ contract KingOfTheDegensTest is Test {
         assertEq(address(this).balance, ownerBalanceBeforeRedeem + gameBalance);
     }
 
-    function test_DepositDegen() public {
-        uint256 totalAssetsBefore = kingOfTheDegens.totalAssets();
-        deal(address(kingOfTheDegens.degenToken()), userAddress, 10_000 ether);
-        vm.startPrank(userAddress);
-        kingOfTheDegens.degenToken().approve(address(kingOfTheDegens), 10_000 ether);
-        kingOfTheDegens.depositDegenToGameAssets(10_000 ether);
-        vm.stopPrank();
-        assertEq(kingOfTheDegens.totalAssets(), totalAssetsBefore + 10_000 ether);
-    }
-
     function test_FlowRates() public {
         StormResults memory stormResults = doStorm(userAddress, random(), 0);
         uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
@@ -152,21 +142,21 @@ contract KingOfTheDegensTest is Test {
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         assertEq(kingOfTheDegens.isGameEnded(), true);
-        uint256 balanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
+        uint256 balanceBefore = address(userAddress).balance;
         doRedeem(userAddress);
-        assertEq(balanceBefore + expectedUserAssets, kingOfTheDegens.degenToken().balanceOf(userAddress));
+        assertEq(balanceBefore + expectedUserAssets, address(userAddress).balance);
     }
 
     function test_King() public {
         // Fast forward 10800 blocks so king role is easier
         vm.roll(block.number + 10800);
         StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
-        uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
+        uint256 userBalanceBefore = address(userAddress).balance;
         assertEq(kingOfTheDegens.king(0), userAddress);
         // Fast forward 10_000 blocks
         vm.roll(block.number + 10800);
         StormResults memory altStormResults = doStorm(altUserAddress, altUserAddressKingSeed, 0);
-        uint256 altUserBalanceBefore = kingOfTheDegens.degenToken().balanceOf(altUserAddress);
+        uint256 altUserBalanceBefore = address(altUserAddress).balance;
         assertEq(kingOfTheDegens.king(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
@@ -174,12 +164,12 @@ contract KingOfTheDegensTest is Test {
             kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * 10800
         );
         doRedeem(userAddress);
-        assertEq(userBalanceBefore + expectedUserAssets, kingOfTheDegens.degenToken().balanceOf(userAddress));
+        assertEq(userBalanceBefore + expectedUserAssets, address(userAddress).balance);
         uint256 expectedAltUserAssets = kingOfTheDegens.convertPointsToAssets(
             kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - (10800 * 2))
         );
         doRedeem(altUserAddress);
-        assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegens.degenToken().balanceOf(altUserAddress));
+        assertEq(altUserBalanceBefore + expectedAltUserAssets, address(altUserAddress).balance);
     }
 
     // WIP
@@ -187,7 +177,7 @@ contract KingOfTheDegensTest is Test {
         // Fast forward 10800 blocks so king role is easier
         vm.roll(block.number + 10800);
         StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
-        uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
+        uint256 userBalanceBefore = address(userAddress).balance;
         assertEq(kingOfTheDegens.king(0), userAddress);
         vm.roll(block.number + 10800);
         ActionResults memory actionResults = doJester(userAddress, address(55555), 0);
@@ -199,11 +189,8 @@ contract KingOfTheDegensTest is Test {
     function test_LordMinPlayAmount() public {
         vm.roll(block.number + 10800);
         StormResults memory stormResults = doStorm(userAddress, userAddressLordSeed, 0);
-        assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Lord));
-        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Lord));
-//        ActionResults memory actionResults = doJester(userAddress, address(55555), 0);
-//        assertEq(actionResults.outAddress, address(0));
-        //Trustus.TrustusPacket memory trustusPacket = buildJesterPacket(jesterAddress, fid, accountAddress == address(1010));
+        assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegensNative.CourtRole.Lord));
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegensNative.CourtRole.Lord));
 
     }
 
@@ -213,7 +200,7 @@ contract KingOfTheDegensTest is Test {
         assertEq(courtPoints[0], 0);
         vm.roll(block.number + 10_000);
         uint256[13] memory courtPointsAfter = kingOfTheDegens.getCourtMemberPoints();
-        assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
+        assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegensNative.CourtRole.King) * 10_000);
     }
 
     function testFail_StormTheCastleBadPacket() public {
@@ -288,21 +275,21 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_CourtRolePointAllocation() public {
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), courtRolePointAllocation[0]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), courtRolePointAllocation[1]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), courtRolePointAllocation[2]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), courtRolePointAllocation[3]);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.King), courtRolePointAllocation[0]);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Lord), courtRolePointAllocation[1]);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Knight), courtRolePointAllocation[2]);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Townsfolk), courtRolePointAllocation[3]);
         uint256[5] memory _courtRolePointAllocation = [uint256(2000), uint256(1500), uint256(1500), uint256(5000), uint256(0)];
         kingOfTheDegens.setCourtRolePointAllocation(_courtRolePointAllocation);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 2000);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), 1500);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), 1500);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), 5000);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.King), 2000);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Lord), 1500);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Knight), 1500);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegensNative.CourtRole.Townsfolk), 5000);
     }
 
 //    function test_FindCourtRole() public {
 //        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
-//        uint256 randomSeed = kingOfTheDegens.findCourtRole(userAddress, KingOfTheDegens.CourtRole.Townsfolk);
+//        uint256 randomSeed = kingOfTheDegens.findCourtRole(userAddress, KingOfTheDegensNative.CourtRole.Townsfolk);
 //        console.log(randomSeed);
 //    }
 
@@ -371,7 +358,7 @@ contract KingOfTheDegensTest is Test {
         }
         return StormResults(
             address(uint160(uint256(entries[stormTopic].topics[1]))),
-            KingOfTheDegens.CourtRole(uint8(uint256(entries[stormTopic].topics[2]))),
+            KingOfTheDegensNative.CourtRole(uint8(uint256(entries[stormTopic].topics[2]))),
             address(uint160(uint256(entries[stormTopic].topics[3]))),
             abi.decode(entries[stormTopic].data, (uint256))
         );

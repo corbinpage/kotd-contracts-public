@@ -12,6 +12,7 @@ contract KingOfTheDegensTest is Test {
     address public immutable altUserAddress = address(123456789);
     uint256 public immutable altUserAddressKingSeed = 610;
     bytes32 public immutable stormEventHash = keccak256("StormTheCastle(address,uint8,address,uint256)");
+    bytes32 public immutable jesterEventHash = keccak256("Action(address,address,uint256,string)");
     bytes32 public immutable redeemEventHash = keccak256("Redeemed(address,uint256,uint256)");
     uint256 public trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
     address public trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
@@ -34,6 +35,13 @@ contract KingOfTheDegensTest is Test {
         KingOfTheDegens.CourtRole courtRole;
         address outAddress;
         uint256 fid;
+    }
+
+    struct ActionResults {
+        address accountAddress;
+        address outAddress;
+        uint256 fid;
+        string actionType;
     }
 
     struct RedeemResults {
@@ -108,14 +116,14 @@ contract KingOfTheDegensTest is Test {
     function test_ProtocolFees() public {
         doStorm(userAddress);
         // Check protocol fee as native
-        assertEq(kingOfTheDegens.protocolFeeBalance(), protocolFee);
+        assertEq(address(kingOfTheDegens).balance, protocolFee);
         // Fast forward to end of game
         vm.roll(block.number + gameDurationBlocks);
         // Collect protocol fees
         uint256 ownerBalanceBeforeProtocol = address(this).balance;
         kingOfTheDegens.collectProtocolFees();
         assertEq(address(this).balance, ownerBalanceBeforeProtocol + protocolFee);
-        assertEq(kingOfTheDegens.protocolFeeBalance(), 0);
+        assertEq(address(kingOfTheDegens).balance, 0);
         // Fast forward to end of redeem
         vm.roll(block.number + redeemAfterGameEndedBlocks);
         // Protocol redeem
@@ -138,13 +146,9 @@ contract KingOfTheDegensTest is Test {
 
     function test_FlowRates() public {
         StormResults memory stormResults = doStorm(userAddress, random(), 0);
-        console.log(uint8(stormResults.courtRole));
-        console.log(kingOfTheDegens.getPointsPerBlock(stormResults.courtRole));
-        console.log(kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks);
-        uint256 expectedUserAssets = kingOfTheDegens.convertPoints(
+        uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
             kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks
         );
-        console.log(expectedUserAssets);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         assertEq(kingOfTheDegens.isGameEnded(), true);
@@ -166,16 +170,28 @@ contract KingOfTheDegensTest is Test {
         assertEq(kingOfTheDegens.king(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
-        uint256 expectedUserAssets = kingOfTheDegens.convertPoints(
+        uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
             kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * 10800
         );
         doRedeem(userAddress);
         assertEq(userBalanceBefore + expectedUserAssets, kingOfTheDegens.degenToken().balanceOf(userAddress));
-        uint256 expectedAltUserAssets = kingOfTheDegens.convertPoints(
+        uint256 expectedAltUserAssets = kingOfTheDegens.convertPointsToAssets(
             kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - (10800 * 2))
         );
         doRedeem(altUserAddress);
         assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegens.degenToken().balanceOf(altUserAddress));
+    }
+
+    function test_SetJester() public {
+        // Fast forward 10800 blocks so king role is easier
+        vm.roll(block.number + 10800);
+        StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
+        uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
+        assertEq(kingOfTheDegens.king(0), userAddress);
+        vm.roll(block.number + 10800);
+        ActionResults memory actionResults = doJester(userAddress, address(55555), 0);
+        assertEq(actionResults.outAddress, address(0));
+
     }
 
     function test_PointsHelper() public {
@@ -197,7 +213,7 @@ contract KingOfTheDegensTest is Test {
     }
 
     function testFail_PauseRedeem() public {
-        doStorm(userAddress, random(), 0);
+        doStorm(userAddress, userAddressKingSeed, 0);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         kingOfTheDegens.togglePause();
@@ -297,7 +313,7 @@ contract KingOfTheDegensTest is Test {
     }
 
     function doStorm(address accountAddress, uint256 randomSeed, uint256 fid) private returns (StormResults memory) {
-        Trustus.TrustusPacket memory trustusPacket = buildPacket(accountAddress, randomSeed, fid);
+        Trustus.TrustusPacket memory trustusPacket = buildStormPacket(randomSeed, fid, accountAddress == address(1010));
         vm.recordLogs();
         // Storm the castle
         hoax(accountAddress);
@@ -323,7 +339,29 @@ contract KingOfTheDegensTest is Test {
         return doStorm(accountAddress, 0, 0);
     }
 
-    function buildPacket(address accountAddress, uint256 randomSeed, uint256 fid) private view returns (Trustus.TrustusPacket memory) {
+    function doJester(address accountAddress, address jesterAddress, uint256 fid) private returns (ActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildJesterPacket(jesterAddress, fid, accountAddress == address(1010));
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.setJesterRole{value: minPlayAmount}(trustusPacket);
+        // Event
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        uint256 jesterTopic = 0;
+        for (uint256 i = 0;i < entries.length;i++) {
+            if (entries[i].topics[0] == jesterEventHash) {
+                jesterTopic = i;
+            }
+        }
+        return ActionResults(
+            address(uint160(uint256(entries[jesterTopic].topics[1]))),
+            address(uint160(uint256(entries[jesterTopic].topics[2]))),
+            uint256(entries[jesterTopic].topics[3]),
+            abi.decode(entries[jesterTopic].data, (string))
+        );
+    }
+
+    function buildStormPacket(uint256 randomSeed, uint256 fid, bool badSigner) private view returns (Trustus.TrustusPacket memory) {
         uint256 deadline = block.timestamp + 300; // 5 minutes
         bytes memory payload = abi.encode(randomSeed, fid);
         bytes32 digest = keccak256(
@@ -335,21 +373,53 @@ contract KingOfTheDegensTest is Test {
                         keccak256(
                             "VerifyPacket(bytes32 request,uint256 deadline,bytes payload)"
                         ),
-                        kingOfTheDegens.TRUSTUS_STORM(),
+                        keccak256(abi.encodePacked("stormTheCastle(TrustusPacket)")),
                         deadline,
                         keccak256(payload)
                     )
                 )
             )
         );
-        uint256 pk = accountAddress == address(1010) ? 1010 : trustedSignerPrivateKey;
+        uint256 pk = badSigner ? 1010 : trustedSignerPrivateKey;
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
 
         return Trustus.TrustusPacket({
             v: v,
             r: r,
             s: s,
-            request: kingOfTheDegens.TRUSTUS_STORM(),
+            request: keccak256(abi.encodePacked("stormTheCastle(TrustusPacket)")),
+            deadline: deadline,
+            payload: payload
+        });
+    }
+
+    function buildJesterPacket(address jesterAddress, uint256 fid, bool badSigner) private view returns (Trustus.TrustusPacket memory) {
+        uint256 deadline = block.timestamp + 300; // 5 minutes
+        bytes memory payload = abi.encode(jesterAddress, fid);
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                kingOfTheDegens.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "VerifyPacket(bytes32 request,uint256 deadline,bytes payload)"
+                        ),
+                        keccak256(abi.encodePacked("setJesterRole(TrustusPacket)")),
+                        deadline,
+                        keccak256(payload)
+                    )
+                )
+            )
+        );
+        uint256 pk = badSigner ? 1010 : trustedSignerPrivateKey;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
+
+        return Trustus.TrustusPacket({
+            v: v,
+            r: r,
+            s: s,
+            request: keccak256(abi.encodePacked("setJesterRole(TrustusPacket)")),
             deadline: deadline,
             payload: payload
         });

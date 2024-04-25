@@ -13,7 +13,7 @@ import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 contract KingOfTheDegens is Owned, Pausable, Trustus {
     uint256 public gameDurationBlocks;
     uint256 public minPlayAmount;
-    uint256 public immutable protocolFee;
+    uint256 public protocolFee;
     uint256 public stormFrequencyBlocks;
     uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public immutable totalPointsPerBlock = 1e18;
@@ -26,16 +26,14 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     mapping(address => CourtRole) public courtRoles;
     mapping(address => uint256) public pointsBalance;
     mapping(address => uint256) public roleStartBlock;
+    mapping (CourtRole => uint256) public roleIndexCeiling;
+    mapping (CourtRole => uint256) public roleCounts;
     uint256 public storms;
     uint256 public gameStartBlock;
     uint256 public gameAssets;
-    uint256 public kingProtectionBlocks = 10_800;
+    uint256 public kingProtectionBlocks = 10800;
     // Court
-    address[1] public king;
-    address[2] public lords;
-    address[3] public knights;
-    address[4] public townsfolk;
-    address[3] public custom;
+    address[11] public court;
     // Role
     enum CourtRole {
         None,
@@ -43,7 +41,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         Lord,
         Knight,
         Townsfolk,
-        Custom
+        Jester
     }
     uint256[3] public courtRoleOddsCeilings;
     // Events
@@ -61,7 +59,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     );
     event Redeemed(address indexed accountAddress, uint256 indexed amountRedeemed, uint256 indexed pointsRedeemed);
     // Custom Errors
-    error BadZeroAddress();
     error GameNotActive(uint256 gameStartBlock, uint256 gameEndBlock, uint256 currentBlock);
     error GameIsActive();
     error RedeemStillActive();
@@ -72,9 +69,9 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error BadCourtRole(CourtRole courtRole);
     error InsufficientBalance();
     error CourtRoleMismatch(address accountAddress, CourtRole courtRole, CourtRole expectedCourtRole);
-    error BadCourtRoleOdds(uint256 percentageTotal);
+    error InvalidPercentage(uint256 percentageTotal);
     error MinPlayAmountOutOfRange(uint256 minPlayAmount);
-    error RequiresCourtRole(CourtRole courtRole);
+    error RequiresCourtRole(CourtRole courtRole, CourtRole actualCourtRole);
     error ArrayLengthMismatch(uint256 length1, uint256 length2);
 
     constructor(
@@ -84,7 +81,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 _stormFrequencyBlocks,
         uint256 _redeemAfterGameEndedBlocks,
         uint256[5] memory _courtRolePointAllocation,
-        uint256[4] memory _courtRoleOdds
+        uint256[4] memory _courtRoleOdds,
+        uint256[5] memory _roleCounts
     ) Owned(msg.sender) {
         gameDurationBlocks = _gameDurationBlocks;
         minPlayAmount = _minPlayAmount;
@@ -93,6 +91,13 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         redeemAfterGameEndedBlocks = _redeemAfterGameEndedBlocks;
         _setCourtRolePointAllocation(_courtRolePointAllocation);
         _setCourtRoleOddsCeilings(_courtRoleOdds);
+        // Calculate roleIndexCeiling and roleCounts based on _roleCounts
+        uint256 _total;
+        for (uint i = 1; i <= _roleCounts.length; i++) {
+            roleCounts[CourtRole(i)] = _roleCounts[i-1];
+            _total += _roleCounts[i-1];
+            roleIndexCeiling[CourtRole(i)] = _total - 1;
+        }
     }
 
     // Public Game Methods
@@ -100,7 +105,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     function stormTheCastle(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("stormTheCastle(TrustusPacket)")), packet) whenNotPaused() {
-        if (msg.sender == address(0)) revert BadZeroAddress();
         if (!isGameActive()) revert GameNotActive(gameStartBlock, gameEndBlock(), block.number);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
         if (stormBlock[msg.sender] + stormFrequencyBlocks >= block.number) revert TooFrequentStorms(
@@ -125,13 +129,13 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         emit StormTheCastle(msg.sender, uint8(courtRole), outAddress, fid);
     }
 
-    function redeem() public whenNotPaused {
+    function redeem() public virtual whenNotPaused {
         if (isGameActive()) revert GameIsActive();
         if (_hasRedeemEnded()) revert RedeemEnded();
         if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None && roleStartBlock[msg.sender] < gameEndBlock()) {
-            updatePointsBalance(msg.sender);
+            updatePointsBalance(msg.sender, courtRoles[msg.sender]);
         }
         if (pointsBalance[msg.sender] == 0) revert InsufficientBalance();
         uint256 degenToSend = convertPointsToAssets(pointsBalance[msg.sender]);
@@ -152,40 +156,55 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     function setJesterRole(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("setJesterRole(TrustusPacket)")), packet) whenNotPaused() {
-        if (courtRoles[msg.sender] != CourtRole.King) revert RequiresCourtRole(CourtRole.King);
+        if (courtRoles[msg.sender] != CourtRole.King) revert RequiresCourtRole(CourtRole.King, courtRoles[msg.sender]);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
         address newJester;
         uint256 fid;
         (newJester, fid) = abi.decode(packet.payload, (address,uint256));
         address outAddress;
         if (courtRoles[newJester] != CourtRole.None) {
-            outAddress = custom[0];
-            updatePointsBalance(newJester);
-            updatePointsBalance(outAddress);
-            _addToCourt(outAddress, courtRoles[newJester]);
-            _addToCourt(newJester, CourtRole.Custom);
+            // TODO Fix this
+            outAddress = swapCourtMember(
+                CourtRole.Jester,
+                0,
+                newJester,
+                courtRoles[newJester]
+            );
         } else {
-            outAddress = replaceRole(newJester, CourtRole.Custom);
+            outAddress = replaceRole(newJester, CourtRole.Jester);
         }
         depositToTreasury(msg.value);
-        emit Action(msg.sender, outAddress, fid, "jester");
+        emit Action(msg.sender, outAddress, fid, "setJesterRole");
+    }
+
+    function setPointStrategy(
+        TrustusPacket calldata packet
+    ) public payable verifyPacket(keccak256(abi.encodePacked("setPointStrategy(TrustusPacket)")), packet) whenNotPaused() {
+        if (courtRoles[msg.sender] != CourtRole.King) revert RequiresCourtRole(CourtRole.King, courtRoles[msg.sender]);
+        if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
+        uint256[5] memory _pointAllocation;
+        (_pointAllocation) = abi.decode(packet.payload, (uint256[5]));
+        _setCourtRolePointAllocation(_pointAllocation);
+        depositToTreasury(msg.value);
+        emit Action(msg.sender, address(0), 0, "setPointsStrategy");
     }
 
     // LORD
     function lordSetMinPlayAmount(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("lordSetMinPlayAmount(TrustusPacket)")), packet) whenNotPaused() {
-        if (courtRoles[msg.sender] != CourtRole.Lord) revert RequiresCourtRole(CourtRole.Lord);
+        if (courtRoles[msg.sender] != CourtRole.Lord) revert RequiresCourtRole(CourtRole.Lord, courtRoles[msg.sender]);
         if (msg.value < minPlayAmount) revert InsufficientFunds(msg.value);
         uint256 _minPlayAmount;
         (_minPlayAmount) = abi.decode(packet.payload, (uint256));
         if (_minPlayAmount != 1e15 && _minPlayAmount != 2e15) revert MinPlayAmountOutOfRange(_minPlayAmount);
         depositToTreasury(msg.value);
-        _setMinPlayAmount(_minPlayAmount);
+        minPlayAmount = _minPlayAmount;
+        protocolFee = _minPlayAmount == 1e15 ? 1e14 : 2e14;
         emit Action(msg.sender, address(0), 0, "lordSetMinPlayAmount");
     }
 
-    // View Methods
+    // Public View Helper Methods
 
     function isGameStarted() public view returns (bool) {
         return gameStartBlock <= block.number;
@@ -239,7 +258,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     }
 
     function getKingRange() public view returns (uint256) {
-        uint256 kingBlock = roleStartBlock[king[0]];
+        uint256 kingBlock = roleStartBlock[king()[0]];
         uint256 endBlock = kingBlock + kingProtectionBlocks;
         uint256 startValue = 100;
         uint256 endValue = courtRoleOddsCeilings[0];
@@ -252,10 +271,13 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         }
     }
 
-    function calculatePointsEarned(address accountAddress) public view returns (uint256) {
+    function calculatePointsEarned(
+        CourtRole courtRole,
+        uint256 startBlock
+    ) public view returns (uint256) {
         uint256 endBlockNumber = block.number > gameEndBlock() ? gameEndBlock() : block.number;
-        if (endBlockNumber <= roleStartBlock[accountAddress]) return 0;
-        return (endBlockNumber - roleStartBlock[accountAddress]) * getPointsPerBlock(courtRoles[accountAddress]);
+        if (endBlockNumber <= startBlock) return 0;
+        return (endBlockNumber - startBlock) * getPointsPerBlock(courtRole);
     }
 
     function convertPointsToAssets(uint256 points) public view returns (uint256) {
@@ -271,34 +293,97 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             return pointsBalance[accountAddress];
         }
         // Court Member - Calculate realtime
-        return pointsBalance[accountAddress] + calculatePointsEarned(accountAddress);
+        return pointsBalance[accountAddress] + calculatePointsEarned(
+            courtRoles[accountAddress],
+            roleStartBlock[accountAddress]
+        );
     }
 
-    function getCourtMemberPoints() public view returns (uint256[13] memory) {
-        address[13] memory courtAddresses = getCourtAddresses();
-        uint256[13] memory points;
-        for (uint256 i = 0;i < courtAddresses.length;i++) {
-            points[i] = getPoints(courtAddresses[i]);
+    function getCourtMemberPoints() public view returns (uint256[11] memory) {
+        uint256[11] memory points;
+        for (uint256 i = 0;i < court.length;i++) {
+            points[i] = getPoints(court[i]);
         }
         return points;
     }
 
-    function getCourtAddresses() public view returns (address[13] memory) {
-        return [
-            king[0],
-            lords[0],
-            lords[1],
-            knights[0],
-            knights[1],
-            knights[2],
-            townsfolk[0],
-            townsfolk[1],
-            townsfolk[2],
-            townsfolk[3],
-            custom[0],
-            custom[1],
-            custom[2]
-        ];
+    function king() public view returns (address[1] memory) {
+        (uint256 start, ) = getCourtRoleIndexes(CourtRole.King);
+        return [court[start]];
+    }
+
+    function lords() public view returns (address[2] memory) {
+        address[2] memory addresses;
+        (uint256 start, uint256 end) = getCourtRoleIndexes(CourtRole.Lord);
+
+        for(uint i = start; i <= end; i++) {
+            addresses[i - start] = court[i];
+        }
+        return addresses;
+    }
+
+    function knights() public view returns (address[3] memory) {
+        address[3] memory addresses;
+        (uint256 start, uint256 end) = getCourtRoleIndexes(CourtRole.Knight);
+
+        for(uint i = start; i <= end; i++) {
+            addresses[i - start] = court[i];
+        }
+        return addresses;
+    }
+
+    function townsfolk() public view returns (address[4] memory) {
+        address[4] memory addresses;
+        (uint256 start, uint256 end) = getCourtRoleIndexes(CourtRole.Townsfolk);
+
+        for(uint i = start; i <= end; i++) {
+            addresses[i - start] = court[i];
+        }
+        return addresses;
+    }
+
+    function jester() public view returns (address[1] memory) {
+        (uint256 start, ) = getCourtRoleIndexes(CourtRole.Jester);
+        return [court[start]];
+    }
+
+    function getCourtRoleFromAddressesIndex(uint256 index) public view returns (CourtRole) {
+        if (index <= roleIndexCeiling[CourtRole.King]) {
+            return CourtRole.King;
+        } else if (index <= roleIndexCeiling[CourtRole.Lord]) {
+            return CourtRole.Lord;
+        } else if (index <= roleIndexCeiling[CourtRole.Knight]) {
+            return CourtRole.Knight;
+        } else if (index <= roleIndexCeiling[CourtRole.Townsfolk]) {
+            return CourtRole.Townsfolk;
+        } else if (index <= roleIndexCeiling[CourtRole.Jester]) {
+            return CourtRole.Jester;
+        }
+        return CourtRole.None;
+    }
+
+    function getCourtRoleIndexes(CourtRole courtRole) public view returns (uint256 start, uint256 end) {
+        if (courtRole == CourtRole.King){
+            return (0, 0);
+        }
+
+        start = roleIndexCeiling[CourtRole(uint(courtRole)-1)] + 1;
+        end = start + roleCounts[courtRole] - 1;
+
+        return (start, end);
+    }
+
+    function indexOfAddressInRole(CourtRole courtRole, address accountAddress) public view returns (uint256) {
+        (uint256 start, uint256 end) = getCourtRoleIndexes(courtRole);
+        uint256 returnIndex;
+        for (uint256 i = start; i <= end; i++) {
+            if (court[i] == accountAddress) {
+                return returnIndex;
+            }
+            returnIndex++;
+        }
+
+        return end;  // returns the end index if the address wasn't found in the range
     }
 
     function findCourtRole(
@@ -316,42 +401,43 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     // Private Methods
 
-    function depositToTreasury(uint256 nativeIn) private {
+    function depositToTreasury(uint256 nativeIn) internal virtual {
         uint256 degenAmount = convertEthToDegen(nativeIn - protocolFee);
         gameAssets += degenAmount;
     }
 
-    function replaceRole(address accountAddress, CourtRole courtRole) private returns(address) {
+    function replaceRole(address accountAddress, CourtRole courtRole) internal returns(address) {
         updateRoleStartBlock(accountAddress);
-        address outAddress = _addToCourt(accountAddress, courtRole);
+        address outAddress = rotateInCourtMember(accountAddress, courtRole);
         if (outAddress != address(0)) {
-            updatePointsBalance(outAddress);
-            updateCourtRole(outAddress, CourtRole.None);
+            updatePointsBalance(outAddress, courtRole);
         }
         return outAddress;
     }
 
-    function restartCourtStreams() private {
-        address[13] memory courtAddresses = getCourtAddresses();
-        for (uint256 i = 0;i < courtAddresses.length;i++) {
-            updatePointsBalance(courtAddresses[i]);
+    function restartCourtStreams() internal {
+        for (uint256 i = 0;i < court.length;i++) {
+            updatePointsBalance(court[i], getCourtRoleFromAddressesIndex(i));
         }
     }
 
-    function updateRoleStartBlock(address accountAddress) private {
+    function updateRoleStartBlock(address accountAddress) internal {
         roleStartBlock[accountAddress] = block.number;
     }
 
-    function updatePointsBalance(address accountAddress) private {
-        pointsBalance[accountAddress] += calculatePointsEarned(accountAddress);
+    function updatePointsBalance(address accountAddress, CourtRole courtRole) internal {
+        pointsBalance[accountAddress] += calculatePointsEarned(
+            courtRole,
+            roleStartBlock[accountAddress]
+        );
         updateRoleStartBlock(accountAddress);
     }
 
-    function updateCourtRole(address accountAddress, CourtRole courtRole) private {
+    function updateCourtRole(address accountAddress, CourtRole courtRole) internal {
         courtRoles[accountAddress] = courtRole;
     }
 
-    function convertEthToDegen(uint256 convertAmountWei) private returns (uint256) {
+    function convertEthToDegen(uint256 convertAmountWei) internal returns (uint256) {
         (uint160 sqrtPriceX96,,,,,,) = degenPool.slot0();
         uint256 sqrtPriceAdjusted = sqrtPriceX96 / (2 ** 48);
         uint256 ethToDegenSpotPrice = (sqrtPriceAdjusted * sqrtPriceAdjusted) / (2 ** 96);
@@ -371,16 +457,22 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return swapRouter02.exactInputSingle{value: convertAmountWei}(params);
     }
 
-    function _setCourtRoleOddsCeilings(uint256[4] memory _courtRoleOdds) private {
+    function _setCourtRoleOddsCeilings(uint256[4] memory _courtRoleOdds) internal {
         uint256 total = _courtRoleOdds[0] + _courtRoleOdds[1] + _courtRoleOdds[2] + _courtRoleOdds[3];
-        if (total != 10_000) revert BadCourtRoleOdds(total);
+        if (total != 10_000) revert InvalidPercentage(total);
 
         courtRoleOddsCeilings[0] = _courtRoleOdds[0];
         courtRoleOddsCeilings[1] = courtRoleOddsCeilings[0] + _courtRoleOdds[1];
         courtRoleOddsCeilings[2] = courtRoleOddsCeilings[1] + _courtRoleOdds[2];
     }
 
-    function _setCourtRolePointAllocation(uint256[5] memory _courtRolePointAllocation) private {
+    function _setCourtRolePointAllocation(uint256[5] memory _courtRolePointAllocation) internal {
+        uint256 total = _courtRolePointAllocation[0] +
+                        (_courtRolePointAllocation[1] * 2) +
+                        (_courtRolePointAllocation[2] * 3) +
+                        (_courtRolePointAllocation[3] * 4) +
+                        _courtRolePointAllocation[4];
+        if (total != 10_000) revert InvalidPercentage(total);
         for (uint256 i = 0;i < _courtRolePointAllocation.length;i++) {
             courtRolePointAllocation[CourtRole(i + 1)] = _courtRolePointAllocation[i];
         }
@@ -390,66 +482,55 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         }
     }
 
-    function _setMinPlayAmount(uint256 _minPlayAmount) private {
-        minPlayAmount = _minPlayAmount;
-    }
-
-    function _setKingProtectionBlocks(uint256 _kingProtectionBlocks) private {
-        kingProtectionBlocks = _kingProtectionBlocks;
-    }
-
-    function _hasRedeemEnded() private view returns (bool) {
+    function _hasRedeemEnded() internal view returns (bool) {
         uint256 redeemEndedBlock = gameEndBlock() + redeemAfterGameEndedBlocks;
         return block.number >= redeemEndedBlock;
     }
 
-    function _addToCourt(address accountAddress, CourtRole courtRole) private returns (address) {
+    function rotateInCourtMember(address accountAddress, CourtRole courtRole) internal returns (address) {
         address outAddress;
-        // Switch flows
         if (courtRole == CourtRole.King) {
-            outAddress = king[0];
-            king[0] = accountAddress;
+            outAddress = swapCourtMember(CourtRole.King, 0, accountAddress, CourtRole.None);
         } else if (courtRole == CourtRole.Lord) {
-            outAddress = lords[0];
-            lords[0] = lords[1];
-            lords[1] = accountAddress;
+            outAddress = rotateCourtRoles(accountAddress, CourtRole.Lord);
         } else if (courtRole == CourtRole.Knight) {
-            outAddress = knights[0];
-            knights[0] = knights[1];
-            knights[1] = knights[2];
-            knights[2] = accountAddress;
+            outAddress = rotateCourtRoles(accountAddress, CourtRole.Knight);
         } else if (courtRole == CourtRole.Townsfolk) {
-            outAddress = townsfolk[0];
-            townsfolk[0] = townsfolk[1];
-            townsfolk[1] = townsfolk[2];
-            townsfolk[2] = townsfolk[3];
-            townsfolk[3] = accountAddress;
-        } else {
-            // Jester for now
-            outAddress = custom[0];
-            custom[0] = accountAddress;
+            outAddress = rotateCourtRoles(accountAddress, CourtRole.Townsfolk);
+        } else if (courtRole == CourtRole.Jester) {
+            outAddress = swapCourtMember(CourtRole.Jester, 0, accountAddress, CourtRole.None);
         }
-        updateCourtRole(accountAddress, courtRole);
+
         return outAddress;
     }
 
-    // Only Owner
-
-    function initGameState(
-        uint256 _storms,
-        address[] memory _accountAddresses,
-        uint256[] memory _points,
-        uint256[] memory _stormBlocks
-    ) public onlyOwner {
-        if (isGameActive()) revert GameIsActive();
-        if (_accountAddresses.length != _points.length) revert ArrayLengthMismatch(_accountAddresses.length, _points.length);
-        if (_stormBlocks.length != _points.length) revert ArrayLengthMismatch(_stormBlocks.length, _points.length);
-        storms = _storms;
-        for (uint256 i = 0;i < _accountAddresses.length;i++) {
-            pointsBalance[_accountAddresses[i]] = _points[i];
-            stormBlock[_accountAddresses[i]] = _stormBlocks[i];
+    function rotateCourtRoles(address newAddress, CourtRole role) internal returns (address) {
+        (uint256 start, uint256 end) = getCourtRoleIndexes(role);
+        address oldAddress = court[start];
+        for(uint i = start; i < end; i++) {
+            court[i] = court[i+1];
         }
+        court[end] = newAddress;
+        updateCourtRole(newAddress, role);
+        updateCourtRole(oldAddress, CourtRole.None);
+        return oldAddress;
     }
+
+    function swapCourtMember(
+        CourtRole courtRole,
+        uint256 index,
+        address newAddress,
+        CourtRole newCourtRole
+    ) internal returns (address) {
+        (uint256 start,) = getCourtRoleIndexes(courtRole);
+        address oldAddress = court[start + index];
+        court[start + index] = newAddress;
+        updateCourtRole(newAddress, courtRole);
+        updateCourtRole(oldAddress, newCourtRole);
+        return oldAddress;
+    }
+
+    // Only Owner
 
     function startGame(
         address[1] calldata _king,
@@ -459,27 +540,27 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 _startBlock
     ) public onlyOwner {
         // Starting court
-        replaceRole(_king[0], CourtRole.King);
-        replaceRole(_lords[0], CourtRole.Lord);
-        replaceRole(_lords[1], CourtRole.Lord);
-        replaceRole(_knights[0], CourtRole.Knight);
-        replaceRole(_knights[1], CourtRole.Knight);
-        replaceRole(_knights[2], CourtRole.Knight);
-        replaceRole(_townsfolk[0], CourtRole.Townsfolk);
-        replaceRole(_townsfolk[1], CourtRole.Townsfolk);
-        replaceRole(_townsfolk[2], CourtRole.Townsfolk);
-        replaceRole(_townsfolk[3], CourtRole.Townsfolk);
+        swapCourtMember(CourtRole.King, 0, _king[0], CourtRole.None);
+        swapCourtMember(CourtRole.Lord, 0, _lords[0], CourtRole.None);
+        swapCourtMember(CourtRole.Lord, 1, _lords[1], CourtRole.None);
+        swapCourtMember(CourtRole.Knight, 0, _knights[0], CourtRole.None);
+        swapCourtMember(CourtRole.Knight, 1, _knights[1], CourtRole.None);
+        swapCourtMember(CourtRole.Knight, 2, _knights[2], CourtRole.None);
+        swapCourtMember(CourtRole.Townsfolk, 0, _townsfolk[0], CourtRole.None);
+        swapCourtMember(CourtRole.Townsfolk, 1, _townsfolk[1], CourtRole.None);
+        swapCourtMember(CourtRole.Townsfolk, 2, _townsfolk[2], CourtRole.None);
+        swapCourtMember(CourtRole.Townsfolk, 3, _townsfolk[3], CourtRole.None);
         // Set starting block
         gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
     }
 
-    function collectProtocolFees() public onlyOwner {
+    function collectProtocolFees() public virtual onlyOwner {
         if (address(this).balance == 0) revert InsufficientBalance();
         if (!isGameEnded()) revert GameIsActive();
         SafeTransferLib.safeTransferETH(msg.sender, address(this).balance);
     }
 
-    function protocolRedeem() public onlyOwner {
+    function protocolRedeem() public virtual onlyOwner {
         if (!_hasRedeemEnded()) revert RedeemStillActive();
         SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToken.balanceOf(address(this)));
     }
@@ -504,6 +585,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         minPlayAmount = _minPlayAmount;
     }
 
+    function setProtocolFee(uint256 _protocolFee) public onlyOwner {
+        protocolFee = _protocolFee;
+    }
+
     function setKingProtectionBlocks(uint256 _kingProtectionBlocks) public onlyOwner {
         kingProtectionBlocks = _kingProtectionBlocks;
     }
@@ -516,5 +601,5 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         _setCourtRolePointAllocation(_courtRolePointAllocation);
     }
 
-    receive() external payable {}
+    receive() external payable virtual {}
 }

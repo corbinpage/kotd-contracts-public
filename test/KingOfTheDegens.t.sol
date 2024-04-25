@@ -18,12 +18,12 @@ contract KingOfTheDegensTest is Test {
     address public trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
     // Settings
     uint256 public immutable gameDurationBlocks = 42300;
-    uint256 public immutable minPlayAmount = 1e15;
     uint256 public immutable protocolFee = 1e14;
     uint256 public immutable stormFrequencyBlocks = 1800;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
     uint256[5] public courtRolePointAllocation = [3300, 1400, 700, 450, 0];
     uint256[4] public courtRoleOdds = [500, 1000, 2000, 6500];
+    uint256[5] public roleCounts = [1, 2, 3, 4, 1];
     // Starting Court
     address[1] public king = [address(1)];
     address[2] public lords = [address(2), address(3)];
@@ -54,12 +54,13 @@ contract KingOfTheDegensTest is Test {
         // Deploy
         kingOfTheDegens = new KingOfTheDegens(
             gameDurationBlocks,
-            minPlayAmount,
+            1e15,
             protocolFee,
             stormFrequencyBlocks,
             redeemAfterGameEndedBlocks,
             courtRolePointAllocation,
-            courtRoleOdds
+            courtRoleOdds,
+            roleCounts
         );
         // Init
         kingOfTheDegens.startGame(
@@ -158,25 +159,23 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_King() public {
-        // Fast forward 10800 blocks so king role is easier
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
         uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
-        assertEq(kingOfTheDegens.king(0), userAddress);
-        // Fast forward 10_000 blocks
-        vm.roll(block.number + 10800);
+        assertEq(kingOfTheDegens.court(0), userAddress);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         StormResults memory altStormResults = doStorm(altUserAddress, altUserAddressKingSeed, 0);
         uint256 altUserBalanceBefore = kingOfTheDegens.degenToken().balanceOf(altUserAddress);
-        assertEq(kingOfTheDegens.king(0), altUserAddress);
+        assertEq(kingOfTheDegens.court(0), altUserAddress);
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
-            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * 10800
+            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * kingOfTheDegens.kingProtectionBlocks()
         );
         doRedeem(userAddress);
         assertEq(userBalanceBefore + expectedUserAssets, kingOfTheDegens.degenToken().balanceOf(userAddress));
         uint256 expectedAltUserAssets = kingOfTheDegens.convertPointsToAssets(
-            kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - (10800 * 2))
+            kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) * (gameDurationBlocks - (kingOfTheDegens.kingProtectionBlocks() * 2))
         );
         doRedeem(altUserAddress);
         assertEq(altUserBalanceBefore + expectedAltUserAssets, kingOfTheDegens.degenToken().balanceOf(altUserAddress));
@@ -184,35 +183,74 @@ contract KingOfTheDegensTest is Test {
 
     // WIP
     function test_SetJester() public {
-        // Fast forward 10800 blocks so king role is easier
-        vm.roll(block.number + 10800);
-        StormResults memory stormResults = doStorm(userAddress, userAddressKingSeed, 0);
-        uint256 userBalanceBefore = kingOfTheDegens.degenToken().balanceOf(userAddress);
-        assertEq(kingOfTheDegens.king(0), userAddress);
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
+        doStorm(userAddress, userAddressKingSeed, 0);
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        // Add new Jester (not in game)
+        vm.roll(block.number + 100);
         ActionResults memory actionResults = doJester(userAddress, address(55555), 0);
         assertEq(actionResults.outAddress, address(0));
-
+        assertEq(address(55555), kingOfTheDegens.jester()[0]);
+        // Swap court member with jester
+//        vm.roll(block.number + 100);
+//        ActionResults memory actionResults2 = doJester(userAddress, address(2), 0);
+//        console.log(actionResults2.outAddress);
+//        assertEq(actionResults2.outAddress, address(55555));
+//        assertEq(address(55555), kingOfTheDegens.lords()[0]);
+//        assertEq(address(2), kingOfTheDegens.jester()[0]);
     }
 
-    // WIP
+    function test_SetPointStrategy() public {
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
+        doStorm(userAddress, userAddressKingSeed, 0);
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        ActionResults memory actionResults = doPointStrategy(userAddress, [uint256(2400), uint256(1500), uint256(800), uint256(550), uint256(0)]);
+        assertEq(actionResults.outAddress, address(0));
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 2400);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 0);
+        ActionResults memory actionResults2 = doPointStrategy(userAddress, [uint256(0), uint256(0), uint256(0), uint256(0), uint256(10000)]);
+        assertEq(actionResults2.outAddress, address(0));
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 0);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 10000);
+    }
+
+    function testFail_SetPointStrategy() public {
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
+        doStorm(userAddress, userAddressKingSeed, 0);
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        doPointStrategy(userAddress, [uint256(243300), uint256(1500), uint256(800), uint256(550), uint256(10000)]);
+    }
+
     function test_LordMinPlayAmount() public {
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         StormResults memory stormResults = doStorm(userAddress, userAddressLordSeed, 0);
         assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Lord));
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Lord));
-//        ActionResults memory actionResults = doJester(userAddress, address(55555), 0);
-//        assertEq(actionResults.outAddress, address(0));
-        //Trustus.TrustusPacket memory trustusPacket = buildJesterPacket(jesterAddress, fid, accountAddress == address(1010));
+        assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
+        doLordMinPlayAmount(userAddress, 2e15);
+        assertEq(kingOfTheDegens.minPlayAmount(), 2e15);
+        assertEq(kingOfTheDegens.protocolFee(), 2e14);
+        vm.roll(block.number + 100);
+        doLordMinPlayAmount(userAddress, 1e15);
+        assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
+        assertEq(kingOfTheDegens.protocolFee(), 1e14);
+    }
 
+    function testFail_LordMinPlayAmount() public {
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
+        StormResults memory stormResults = doStorm(userAddress, userAddressLordSeed, 0);
+        assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Lord));
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Lord));
+        assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
+        doLordMinPlayAmount(userAddress, 1e14);
     }
 
     function test_PointsHelper() public {
         doStorm(userAddress, userAddressKingSeed, 0);
-        uint256[13] memory courtPoints = kingOfTheDegens.getCourtMemberPoints();
+        uint256[11] memory courtPoints = kingOfTheDegens.getCourtMemberPoints();
         assertEq(courtPoints[0], 0);
         vm.roll(block.number + 10_000);
-        uint256[13] memory courtPointsAfter = kingOfTheDegens.getCourtMemberPoints();
+        uint256[11] memory courtPointsAfter = kingOfTheDegens.getCourtMemberPoints();
         assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
     }
 
@@ -234,13 +272,12 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_StormFrequency() public {
-        // Fast forward 10800 blocks so king role is easier
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         kingOfTheDegens.setStormFrequency(1);
         doStorm(userAddress, userAddressKingSeed, 0);
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         doStorm(altUserAddress, altUserAddressKingSeed, 0);
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         doStorm(userAddress, userAddressKingSeed, 0);
     }
 
@@ -253,8 +290,7 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_KingProtection() public {
-        // Fast forward 10800 blocks so king role is back to default
-        vm.roll(block.number + 10800);
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         // Crown New King
         doStorm(userAddress, userAddressKingSeed, 0);
         assertEq(kingOfTheDegens.getKingRange(), 100);
@@ -292,17 +328,19 @@ contract KingOfTheDegensTest is Test {
         assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), courtRolePointAllocation[1]);
         assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), courtRolePointAllocation[2]);
         assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), courtRolePointAllocation[3]);
-        uint256[5] memory _courtRolePointAllocation = [uint256(2000), uint256(1500), uint256(1500), uint256(5000), uint256(0)];
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), courtRolePointAllocation[4]);
+        uint256[5] memory _courtRolePointAllocation = [uint256(3100), uint256(1400), uint256(600), uint256(350), uint256(900)];
         kingOfTheDegens.setCourtRolePointAllocation(_courtRolePointAllocation);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 2000);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), 1500);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), 1500);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), 5000);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 3100);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), 1400);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), 600);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), 350);
+        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 900);
     }
 
 //    function test_FindCourtRole() public {
 //        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
-//        uint256 randomSeed = kingOfTheDegens.findCourtRole(userAddress, KingOfTheDegens.CourtRole.Townsfolk);
+//        uint256 randomSeed = kingOfTheDegens.findCourtRole(userAddress, KingOfTheDegens.CourtRole.King);
 //        console.log(randomSeed);
 //    }
 
@@ -323,10 +361,11 @@ contract KingOfTheDegensTest is Test {
             abi.encode(randomSeed, fid),
             accountAddress == address(1010)
         );
+        uint256 playAmount = kingOfTheDegens.minPlayAmount();
         vm.recordLogs();
         // Storm the castle
         hoax(accountAddress);
-        kingOfTheDegens.stormTheCastle{value: minPlayAmount}(trustusPacket);
+        kingOfTheDegens.stormTheCastle{value: playAmount}(trustusPacket);
         return processStormLogs();
     }
 
@@ -336,9 +375,36 @@ contract KingOfTheDegensTest is Test {
             abi.encode(jesterAddress, fid),
             accountAddress == address(1010)
         );
+        uint256 playAmount = kingOfTheDegens.minPlayAmount();
         vm.recordLogs();
         hoax(accountAddress);
-        kingOfTheDegens.setJesterRole{value: minPlayAmount}(trustusPacket);
+        kingOfTheDegens.setJesterRole{value: playAmount}(trustusPacket);
+        return processActionLogs();
+    }
+
+    function doPointStrategy(address accountAddress, uint256[5] memory _pointAllocation) private returns (ActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(
+            keccak256(abi.encodePacked("setPointStrategy(TrustusPacket)")),
+            abi.encode(_pointAllocation),
+            accountAddress == address(1010)
+        );
+        uint256 playAmount = kingOfTheDegens.minPlayAmount();
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.setPointStrategy{value: playAmount}(trustusPacket);
+        return processActionLogs();
+    }
+
+    function doLordMinPlayAmount(address accountAddress, uint256 _minPlayAmount) private returns (ActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(
+            keccak256(abi.encodePacked("lordSetMinPlayAmount(TrustusPacket)")),
+            abi.encode(_minPlayAmount),
+            accountAddress == address(1010)
+        );
+        uint256 playAmount = kingOfTheDegens.minPlayAmount();
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.lordSetMinPlayAmount{value: playAmount}(trustusPacket);
         return processActionLogs();
     }
 
@@ -369,6 +435,7 @@ contract KingOfTheDegensTest is Test {
                 stormTopic = i;
             }
         }
+
         return StormResults(
             address(uint160(uint256(entries[stormTopic].topics[1]))),
             KingOfTheDegens.CourtRole(uint8(uint256(entries[stormTopic].topics[2]))),

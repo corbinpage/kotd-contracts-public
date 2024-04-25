@@ -183,12 +183,11 @@ contract KingOfTheDegensTest is Test {
         assertEq(actionResults.outAddress, address(0));
         assertEq(address(55555), kingOfTheDegens.jester()[0]);
         // Swap court member with jester
-//        vm.roll(block.number + 100);
-//        ActionResults memory actionResults2 = doJester(userAddress, address(2), 0);
-//        console.log(actionResults2.outAddress);
-//        assertEq(actionResults2.outAddress, address(55555));
-//        assertEq(address(55555), kingOfTheDegens.lords()[0]);
-//        assertEq(address(2), kingOfTheDegens.jester()[0]);
+        vm.roll(block.number + 100);
+        ActionResults memory actionResults2 = doJester(userAddress, address(2), 0);
+        assertEq(actionResults2.outAddress, address(55555));
+        assertEq(address(55555), kingOfTheDegens.lords()[0]);
+        assertEq(address(2), kingOfTheDegens.jester()[0]);
     }
 
     function test_SetPointStrategy() public {

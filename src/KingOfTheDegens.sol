@@ -120,7 +120,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         (randomSeed, fid) = abi.decode(packet.payload, (uint256,uint256));
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
-        address outAddress = replaceRole(msg.sender, courtRole);
+        address outAddress = replaceCourtMember(msg.sender, courtRole);
         depositToTreasury(msg.value);
         // Increment play count
         storms++;
@@ -163,15 +163,11 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         (newJester, fid) = abi.decode(packet.payload, (address,uint256));
         address outAddress;
         if (courtRoles[newJester] != CourtRole.None) {
-            // TODO Fix this
-            outAddress = swapCourtMember(
-                CourtRole.Jester,
-                0,
-                newJester,
-                courtRoles[newJester]
-            );
+            address oldJester = jester()[0];
+            outAddress = oldJester;
+            swapCourtMember(newJester, oldJester);
         } else {
-            outAddress = replaceRole(newJester, CourtRole.Jester);
+            outAddress = replaceCourtMember(newJester, CourtRole.Jester);
         }
         depositToTreasury(msg.value);
         emit Action(msg.sender, outAddress, fid, "setJesterRole");
@@ -399,20 +395,52 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return 0;
     }
 
-    // Private Methods
+    // Internal Methods
 
     function depositToTreasury(uint256 nativeIn) internal virtual {
         uint256 degenAmount = convertEthToDegen(nativeIn - protocolFee);
         gameAssets += degenAmount;
     }
 
-    function replaceRole(address accountAddress, CourtRole courtRole) internal returns(address) {
-        updateRoleStartBlock(accountAddress);
-        address outAddress = rotateInCourtMember(accountAddress, courtRole);
-        if (outAddress != address(0)) {
-            updatePointsBalance(outAddress, courtRole);
+
+    function replaceCourtMember(address accountAddress, CourtRole courtRole) internal returns(address) {
+        // Rotate In
+        (uint256 start, uint256 end) = getCourtRoleIndexes(courtRole);
+        address outAddress = court[start];
+        for(uint i = start; i < end; i++) {
+            court[i] = court[i+1];
         }
+        court[end] = accountAddress;
+        // Set Court Roles
+        updateCourtRole(accountAddress, courtRole);
+        updateCourtRole(outAddress, CourtRole.None);
+        // Update Points Balance outAddress
+        updatePointsBalance(outAddress, courtRole);
+        // Update Role Start Block for accountAddress
+        updateRoleStartBlock(accountAddress);
         return outAddress;
+    }
+
+    function swapCourtMember(
+        address address1,
+        address address2
+    ) internal {
+        CourtRole courtRole1 = courtRoles[address1];
+        CourtRole courtRole2 = courtRoles[address2];
+        // Update Points Balance on both addresses to close out old role
+        updatePointsBalance(address1, courtRole1);
+        updatePointsBalance(address2, courtRole2);
+        // Find index
+        uint256 index1 = indexOfAddressInRole(courtRole1, address1);
+        uint256 index2 = indexOfAddressInRole(courtRole2, address2);
+        (uint256 start1,) = getCourtRoleIndexes(courtRole1);
+        (uint256 start2,) = getCourtRoleIndexes(courtRole2);
+        // Swap roles
+        court[start1 + index1] = address2;
+        court[start2 + index2] = address1;
+        // Update court role mapping
+        updateCourtRole(address1, courtRole2);
+        updateCourtRole(address2, courtRole1);
     }
 
     function restartCourtStreams() internal {
@@ -487,49 +515,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return block.number >= redeemEndedBlock;
     }
 
-    function rotateInCourtMember(address accountAddress, CourtRole courtRole) internal returns (address) {
-        address outAddress;
-        if (courtRole == CourtRole.King) {
-            outAddress = swapCourtMember(CourtRole.King, 0, accountAddress, CourtRole.None);
-        } else if (courtRole == CourtRole.Lord) {
-            outAddress = rotateCourtRoles(accountAddress, CourtRole.Lord);
-        } else if (courtRole == CourtRole.Knight) {
-            outAddress = rotateCourtRoles(accountAddress, CourtRole.Knight);
-        } else if (courtRole == CourtRole.Townsfolk) {
-            outAddress = rotateCourtRoles(accountAddress, CourtRole.Townsfolk);
-        } else if (courtRole == CourtRole.Jester) {
-            outAddress = swapCourtMember(CourtRole.Jester, 0, accountAddress, CourtRole.None);
-        }
-
-        return outAddress;
-    }
-
-    function rotateCourtRoles(address newAddress, CourtRole role) internal returns (address) {
-        (uint256 start, uint256 end) = getCourtRoleIndexes(role);
-        address oldAddress = court[start];
-        for(uint i = start; i < end; i++) {
-            court[i] = court[i+1];
-        }
-        court[end] = newAddress;
-        updateCourtRole(newAddress, role);
-        updateCourtRole(oldAddress, CourtRole.None);
-        return oldAddress;
-    }
-
-    function swapCourtMember(
-        CourtRole courtRole,
-        uint256 index,
-        address newAddress,
-        CourtRole newCourtRole
-    ) internal returns (address) {
-        (uint256 start,) = getCourtRoleIndexes(courtRole);
-        address oldAddress = court[start + index];
-        court[start + index] = newAddress;
-        updateCourtRole(newAddress, courtRole);
-        updateCourtRole(oldAddress, newCourtRole);
-        return oldAddress;
-    }
-
     // Only Owner
 
     function startGame(
@@ -540,16 +525,16 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 _startBlock
     ) public onlyOwner {
         // Starting court
-        swapCourtMember(CourtRole.King, 0, _king[0], CourtRole.None);
-        swapCourtMember(CourtRole.Lord, 0, _lords[0], CourtRole.None);
-        swapCourtMember(CourtRole.Lord, 1, _lords[1], CourtRole.None);
-        swapCourtMember(CourtRole.Knight, 0, _knights[0], CourtRole.None);
-        swapCourtMember(CourtRole.Knight, 1, _knights[1], CourtRole.None);
-        swapCourtMember(CourtRole.Knight, 2, _knights[2], CourtRole.None);
-        swapCourtMember(CourtRole.Townsfolk, 0, _townsfolk[0], CourtRole.None);
-        swapCourtMember(CourtRole.Townsfolk, 1, _townsfolk[1], CourtRole.None);
-        swapCourtMember(CourtRole.Townsfolk, 2, _townsfolk[2], CourtRole.None);
-        swapCourtMember(CourtRole.Townsfolk, 3, _townsfolk[3], CourtRole.None);
+        replaceCourtMember(_king[0], CourtRole.King);
+        replaceCourtMember(_lords[0], CourtRole.Lord);
+        replaceCourtMember(_lords[1], CourtRole.Lord);
+        replaceCourtMember(_knights[0], CourtRole.Knight);
+        replaceCourtMember(_knights[1], CourtRole.Knight);
+        replaceCourtMember(_knights[2], CourtRole.Knight);
+        replaceCourtMember(_townsfolk[0], CourtRole.Townsfolk);
+        replaceCourtMember(_townsfolk[1], CourtRole.Townsfolk);
+        replaceCourtMember(_townsfolk[2], CourtRole.Townsfolk);
+        replaceCourtMember(_townsfolk[3], CourtRole.Townsfolk);
         // Set starting block
         gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
     }

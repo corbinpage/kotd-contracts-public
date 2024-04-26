@@ -13,9 +13,9 @@ contract KingOfTheDegensNative is KingOfTheDegens {
         uint256 _protocolFee,
         uint256 _stormFrequencyBlocks,
         uint256 _redeemAfterGameEndedBlocks,
-        uint256[5] memory _courtRolePointAllocation,
         uint256[4] memory _courtRoleOdds,
-        uint256[5] memory _roleCounts
+        uint256[5] memory _roleCounts,
+        uint256[5][5] memory _pointAllocationTemplates
     )
     KingOfTheDegens(
     _gameDurationBlocks,
@@ -23,9 +23,9 @@ contract KingOfTheDegensNative is KingOfTheDegens {
     _protocolFee,
     _stormFrequencyBlocks,
     _redeemAfterGameEndedBlocks,
-    _courtRolePointAllocation,
     _courtRoleOdds,
-    _roleCounts
+    _roleCounts,
+    _pointAllocationTemplates
     )
     {
 
@@ -62,9 +62,5 @@ contract KingOfTheDegensNative is KingOfTheDegens {
     function protocolRedeem() public override onlyOwner {
         if (!_hasRedeemEnded()) revert RedeemStillActive();
         SafeTransferLib.safeTransferETH(owner, address(this).balance);
-    }
-
-    receive() external payable override {
-        gameAssets += msg.value;
     }
 }

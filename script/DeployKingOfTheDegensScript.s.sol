@@ -13,8 +13,14 @@ contract DeployKingOfTheDegensScript is Script {
     uint256 public immutable protocolFee = 1e14;
     uint256 public immutable stormFrequencyBlocks = 1800;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
-    uint256[5] public courtRolePointAllocation = [3300, 1400, 700, 450, 0];
-    uint256[4] public courtRoleOdds = [500, 1000, 2000, 6500];
+    uint256[5][5] public courtRolePointAllocationTemplates = [
+        [3100, 1400, 600, 350, 900],
+        [4900, 1300, 500, 250, 0],
+        [3100, 1400, 900, 350, 0],
+        [2400, 1500, 800, 550, 0],
+        [0, 1400, 1900, 375, 0]
+    ];
+    uint256[4] public courtRoleOdds = [500, 1000, 2500, 6000];
     uint256[5] public roleCounts = [1, 2, 3, 4, 1];
     uint256 public immutable trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
     address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
@@ -48,9 +54,9 @@ contract DeployKingOfTheDegensScript is Script {
             protocolFee,
             stormFrequencyBlocks,
             redeemAfterGameEndedBlocks,
-            courtRolePointAllocation,
             courtRoleOdds,
-            roleCounts
+            roleCounts,
+            courtRolePointAllocationTemplates
         );
         console.log("KingOfTheDegens Game deployed to: %s", address(kingOfTheDegens));
         startGame();

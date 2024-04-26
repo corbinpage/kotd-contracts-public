@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {KingOfTheDegensNative} from "../src/KingOfTheDegensNative.sol";
 import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Trustus} from "trustus/Trustus.sol";
+import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 
 contract KingOfTheDegensTest is Test {
     KingOfTheDegensNative public kingOfTheDegens;
@@ -22,8 +23,14 @@ contract KingOfTheDegensTest is Test {
     uint256 public immutable protocolFee = 1e14;
     uint256 public immutable stormFrequencyBlocks = 1800;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
-    uint256[5] public courtRolePointAllocation = [3300, 1400, 700, 450, 0];
-    uint256[4] public courtRoleOdds = [500, 1000, 2000, 6500];
+    uint256[5][5] public pointAllocationTemplates = [
+        [3100, 1400, 600, 350, 900],
+        [4900, 1300, 500, 250, 0],
+        [3100, 1400, 900, 350, 0],
+        [2400, 1500, 800, 550, 0],
+        [0, 1400, 1900, 375, 0]
+    ];
+    uint256[4] public courtRoleOdds = [500, 1000, 2500, 6000];
     uint256[5] public roleCounts = [1, 2, 3, 4, 1];
     // Starting Court
     address[1] public king = [address(1)];
@@ -41,7 +48,7 @@ contract KingOfTheDegensTest is Test {
     struct ActionResults {
         address accountAddress;
         address outAddress;
-        uint256 fid;
+        uint256 outData;
         string actionType;
     }
 
@@ -59,9 +66,9 @@ contract KingOfTheDegensTest is Test {
             protocolFee,
             stormFrequencyBlocks,
             redeemAfterGameEndedBlocks,
-            courtRolePointAllocation,
             courtRoleOdds,
-            roleCounts
+            roleCounts,
+            pointAllocationTemplates
         );
         // Init
         kingOfTheDegens.startGame(
@@ -194,45 +201,65 @@ contract KingOfTheDegensTest is Test {
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         doStorm(userAddress, userAddressKingSeed, 0);
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
-        ActionResults memory actionResults = doPointStrategy(userAddress, [uint256(2400), uint256(1500), uint256(800), uint256(550), uint256(0)]);
+        ActionResults memory actionResults = doPointStrategy(userAddress, uint8(KingOfTheDegens.PointAllocationTemplate.Military));
         assertEq(actionResults.outAddress, address(0));
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 2400);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 0);
-        ActionResults memory actionResults2 = doPointStrategy(userAddress, [uint256(0), uint256(0), uint256(0), uint256(0), uint256(10000)]);
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Military);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Lord, KingOfTheDegens.PointAllocationTemplate.Military);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Knight, KingOfTheDegens.PointAllocationTemplate.Military);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, KingOfTheDegens.PointAllocationTemplate.Military);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Jester, KingOfTheDegens.PointAllocationTemplate.Military);
+        ActionResults memory actionResults2 = doPointStrategy(userAddress, uint8(KingOfTheDegens.PointAllocationTemplate.Peoples));
         assertEq(actionResults2.outAddress, address(0));
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 0);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 10000);
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Peoples);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Lord, KingOfTheDegens.PointAllocationTemplate.Peoples);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Knight, KingOfTheDegens.PointAllocationTemplate.Peoples);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, KingOfTheDegens.PointAllocationTemplate.Peoples);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Jester, KingOfTheDegens.PointAllocationTemplate.Peoples);
     }
 
     function testFail_SetPointStrategy() public {
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         doStorm(userAddress, userAddressKingSeed, 0);
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
-        doPointStrategy(userAddress, [uint256(243300), uint256(1500), uint256(800), uint256(550), uint256(10000)]);
+        doPointStrategy(userAddress, uint8(0));
     }
 
-    function test_LordMinPlayAmount() public {
+    function test_SetStormFee() public {
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         StormResults memory stormResults = doStorm(userAddress, userAddressLordSeed, 0);
         assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Lord));
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Lord));
         assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
-        doLordMinPlayAmount(userAddress, 2e15);
+        doStormFee(userAddress, 2e15);
         assertEq(kingOfTheDegens.minPlayAmount(), 2e15);
         assertEq(kingOfTheDegens.protocolFee(), 2e14);
         vm.roll(block.number + 100);
-        doLordMinPlayAmount(userAddress, 1e15);
+        doStormFee(userAddress, 1e15);
         assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
         assertEq(kingOfTheDegens.protocolFee(), 1e14);
     }
 
-    function testFail_LordMinPlayAmount() public {
+    function testFail_SetStormFee() public {
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         StormResults memory stormResults = doStorm(userAddress, userAddressLordSeed, 0);
         assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Lord));
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Lord));
         assertEq(kingOfTheDegens.minPlayAmount(), 1e15);
-        doLordMinPlayAmount(userAddress, 1e14);
+        doStormFee(userAddress, 1e14);
+    }
+
+    function test_AttackKing() public {
+        vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
+        StormResults memory stormResults = doStorm(userAddress, userAddressKnightSeed, 0);
+        assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Knight));
+        ActionResults memory actionResults = doAttackKing(userAddress, false);
+        assertEq(actionResults.outAddress, address(0));
+        assertEq(actionResults.outData, 0);
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, kingOfTheDegens.activePointAllocationTemplate());
+        ActionResults memory actionResults2 = doAttackKing(userAddress, true);
+        assertEq(actionResults2.outAddress, kingOfTheDegens.king()[0]);
+        assertEq(actionResults2.outData, 1);
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Dead);
     }
 
     function test_PointsHelper() public {
@@ -313,19 +340,40 @@ contract KingOfTheDegensTest is Test {
         assertEq(kingOfTheDegens.courtRoleOddsCeilings(2), 1000);
     }
 
-    function test_CourtRolePointAllocation() public {
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), courtRolePointAllocation[0]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), courtRolePointAllocation[1]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), courtRolePointAllocation[2]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), courtRolePointAllocation[3]);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), courtRolePointAllocation[4]);
-        uint256[5] memory _courtRolePointAllocation = [uint256(3100), uint256(1400), uint256(600), uint256(350), uint256(900)];
-        kingOfTheDegens.setCourtRolePointAllocation(_courtRolePointAllocation);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.King), 3100);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Lord), 1400);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Knight), 600);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Townsfolk), 350);
-        assertEq(kingOfTheDegens.courtRolePointAllocation(KingOfTheDegens.CourtRole.Jester), 900);
+    function test_PointAllocation() public {
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, kingOfTheDegens.activePointAllocationTemplate());
+        comparePointAllocation(KingOfTheDegens.CourtRole.Lord, kingOfTheDegens.activePointAllocationTemplate());
+        comparePointAllocation(KingOfTheDegens.CourtRole.Knight, kingOfTheDegens.activePointAllocationTemplate());
+        comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, kingOfTheDegens.activePointAllocationTemplate());
+        comparePointAllocation(KingOfTheDegens.CourtRole.Jester, kingOfTheDegens.activePointAllocationTemplate());
+        kingOfTheDegens.setActivePointAllocationTemplate(KingOfTheDegens.PointAllocationTemplate.Greedy);
+        comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Greedy);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Lord, KingOfTheDegens.PointAllocationTemplate.Greedy);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Knight, KingOfTheDegens.PointAllocationTemplate.Greedy);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, KingOfTheDegens.PointAllocationTemplate.Greedy);
+        comparePointAllocation(KingOfTheDegens.CourtRole.Jester, KingOfTheDegens.PointAllocationTemplate.Greedy);
+    }
+
+    function comparePointAllocation(
+        KingOfTheDegens.CourtRole courtRole,
+        KingOfTheDegens.PointAllocationTemplate pointAllocationTemplate
+    ) internal {
+        assertEq(
+            kingOfTheDegens.getActiveCourtRolePointAllocation(courtRole),
+            kingOfTheDegens.getCourtRolePointAllocation(courtRole, pointAllocationTemplate)
+        );
+    }
+
+    function test_SendETH() public {
+        address friendlyUser = address(123123123456);
+        uint256 nativeBalanceBefore = address(kingOfTheDegens).balance;
+        uint256 protocolFeeBalanceBefore = kingOfTheDegens.protocolFeeBalance();
+        hoax(friendlyUser);
+        uint256 balanceBefore = address(friendlyUser).balance;
+        SafeTransferLib.safeTransferETH(address(kingOfTheDegens), 1 ether);
+        assertEq(balanceBefore, address(friendlyUser).balance + 1 ether);
+        assertEq(protocolFeeBalanceBefore + kingOfTheDegens.protocolFee(), kingOfTheDegens.protocolFeeBalance());
+        assertEq(address(kingOfTheDegens).balance, nativeBalanceBefore + 1 ether);
     }
 
 //    function test_FindCourtRole() public {
@@ -372,10 +420,10 @@ contract KingOfTheDegensTest is Test {
         return processActionLogs();
     }
 
-    function doPointStrategy(address accountAddress, uint256[5] memory _pointAllocation) private returns (ActionResults memory) {
+    function doPointStrategy(address accountAddress, uint8 _pointAllocationTemplate) private returns (ActionResults memory) {
         Trustus.TrustusPacket memory trustusPacket = buildPacket(
             keccak256(abi.encodePacked("setPointStrategy(TrustusPacket)")),
-            abi.encode(_pointAllocation),
+            abi.encode(_pointAllocationTemplate),
             accountAddress == address(1010)
         );
         uint256 playAmount = kingOfTheDegens.minPlayAmount();
@@ -385,16 +433,29 @@ contract KingOfTheDegensTest is Test {
         return processActionLogs();
     }
 
-    function doLordMinPlayAmount(address accountAddress, uint256 _minPlayAmount) private returns (ActionResults memory) {
+    function doStormFee(address accountAddress, uint256 _minPlayAmount) private returns (ActionResults memory) {
         Trustus.TrustusPacket memory trustusPacket = buildPacket(
-            keccak256(abi.encodePacked("lordSetMinPlayAmount(TrustusPacket)")),
+            keccak256(abi.encodePacked("setStormFee(TrustusPacket)")),
             abi.encode(_minPlayAmount),
             accountAddress == address(1010)
         );
         uint256 playAmount = kingOfTheDegens.minPlayAmount();
         vm.recordLogs();
         hoax(accountAddress);
-        kingOfTheDegens.lordSetMinPlayAmount{value: playAmount}(trustusPacket);
+        kingOfTheDegens.setStormFee{value: playAmount}(trustusPacket);
+        return processActionLogs();
+    }
+
+    function doAttackKing(address accountAddress, bool isKingDead) private returns (ActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(
+            keccak256(abi.encodePacked("attackKing(TrustusPacket)")),
+            abi.encode(isKingDead),
+            accountAddress == address(1010)
+        );
+        uint256 playAmount = kingOfTheDegens.minPlayAmount();
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.attackKing{value: playAmount}(trustusPacket);
         return processActionLogs();
     }
 

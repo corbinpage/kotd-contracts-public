@@ -10,17 +10,17 @@ contract KingOfTheDegensNative is KingOfTheDegens {
     constructor(
         uint256 _gameDurationBlocks,
         uint256 _minPlayAmount,
-        uint256 _protocolFee,
+        uint256 _protocolFeePercent,
         uint256 _stormFrequencyBlocks,
         uint256 _redeemAfterGameEndedBlocks,
         uint256[4] memory _courtRoleOdds,
-        uint256[5] memory _roleCounts,
-        uint256[5][5] memory _pointAllocationTemplates
+        uint256[7] memory _roleCounts,
+        uint256[7][5] memory _pointAllocationTemplates
     )
     KingOfTheDegens(
     _gameDurationBlocks,
     _minPlayAmount,
-    _protocolFee,
+    _protocolFeePercent,
     _stormFrequencyBlocks,
     _redeemAfterGameEndedBlocks,
     _courtRoleOdds,
@@ -48,8 +48,9 @@ contract KingOfTheDegensNative is KingOfTheDegens {
     }
 
     function depositToTreasury(uint256 nativeIn) internal override {
-        gameAssets += (nativeIn - protocolFee);
-        protocolFeeBalance += protocolFee;
+        uint256 _protocolFee = (nativeIn * protocolFeePercent) / 10_000;
+        gameAssets += (nativeIn - _protocolFee);
+        protocolFeeBalance += _protocolFee;
     }
 
     function collectProtocolFees() public override onlyOwner {

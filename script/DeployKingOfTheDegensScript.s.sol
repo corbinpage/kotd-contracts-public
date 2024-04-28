@@ -9,19 +9,19 @@ contract DeployKingOfTheDegensScript is Script {
     KingOfTheDegens kingOfTheDegens;
     // Settings
     uint256 public immutable gameDurationBlocks = 888300;
-    uint256 public immutable minPlayAmount = 1e15;
-    uint256 public immutable protocolFee = 1e14;
+    uint256 public immutable stormFee = 1e15;
+    uint256 public immutable protocolFeePercentage = 1000;
     uint256 public immutable stormFrequencyBlocks = 1800;
     uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
-    uint256[5][5] public courtRolePointAllocationTemplates = [
-        [3100, 1400, 600, 350, 900],
-        [4900, 1300, 500, 250, 0],
-        [3100, 1400, 900, 350, 0],
-        [2400, 1500, 800, 550, 0],
-        [0, 1400, 1900, 375, 0]
+    uint256[7][5] public pointAllocationTemplates = [
+        [3100, 1400, 600, 350, 300, 300, 300],
+        [4900, 1300, 500, 250, 0, 0, 0],
+        [3100, 1400, 900, 350, 0, 0, 0],
+        [2400, 1500, 800, 550, 0, 0, 0],
+        [0, 1400, 1900, 375, 0, 0, 0]
     ];
     uint256[4] public courtRoleOdds = [500, 1000, 2500, 6000];
-    uint256[5] public roleCounts = [1, 2, 3, 4, 1];
+    uint256[7] public roleCounts = [1, 2, 3, 4, 1, 1, 1];
     uint256 public immutable trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
     address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
 //    address public immutable newOwnerAddress = 0x6Ca74A32F864918a7399d37592438A80Ec7Ec8D9;
@@ -48,16 +48,7 @@ contract DeployKingOfTheDegensScript is Script {
     function run() public {
         uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(key);
-        kingOfTheDegens = new KingOfTheDegens(
-            gameDurationBlocks,
-            minPlayAmount,
-            protocolFee,
-            stormFrequencyBlocks,
-            redeemAfterGameEndedBlocks,
-            courtRoleOdds,
-            roleCounts,
-            courtRolePointAllocationTemplates
-        );
+        kingOfTheDegens = newKingOfTheDegens();
         console.log("KingOfTheDegens Game deployed to: %s", address(kingOfTheDegens));
         startGame();
         // Set Trustus address
@@ -65,6 +56,19 @@ contract DeployKingOfTheDegensScript is Script {
         console.log("Trustus signer added: %s", trustedSignerAddress);
         //transferOwnership(newOwnerAddress);
         vm.stopBroadcast();
+    }
+
+    function newKingOfTheDegens() internal virtual returns (KingOfTheDegens) {
+        return new KingOfTheDegens(
+            gameDurationBlocks,
+            stormFee,
+            protocolFeePercentage,
+            stormFrequencyBlocks,
+            redeemAfterGameEndedBlocks,
+            courtRoleOdds,
+            roleCounts,
+            pointAllocationTemplates
+        );
     }
 
     function startGame() private {

@@ -37,7 +37,7 @@ contract KingOfTheDegensNative is KingOfTheDegens {
         if (address(this).balance == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None && roleStartBlock[msg.sender] < gameEndBlock()) {
-            updatePointsBalance(msg.sender, courtRoles[msg.sender]);
+            _updatePointsBalance(msg.sender, courtRoles[msg.sender]);
         }
         if (pointsBalance[msg.sender] == 0) revert InsufficientBalance();
         uint256 nativeToSend = convertPointsToAssets(pointsBalance[msg.sender]);

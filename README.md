@@ -1,48 +1,150 @@
-## King of the Castle Game
+## King of the Degens Contract
+1. ERC20 Token: Takes in stormFee as native and converts to DEGEN before adding to treasury `(src/KingOfTheDegens.sol)`
+2. Native: Takes in stormFee as native and stores treasury in native. Meant to be deployed to DEGEN chain or testnets without a DEGEN market. `(src/KingOfTheDegensNative.sol)`
+### Play the Game
+
+#### stormTheCastle
+- `stormTheCastle(TrustusPacket calldata packet)`
+- `packet.payload` => `abi.encode(uint256 randomSeed, uint256 fid)`
+- This will add the `msg.sender` to a stormable Court Role based on chance. Primary game method.
+
+#### runCourtRoleAction
+- `runCourtRoleAction(TrustusPacket calldata packet)`
+- `packet.payload` => `abi.encode(uint256 fid, address replaceAddress, uint256 courtIndex)`
+- Use this method to swap `replaceAddress` with address in `court` at the `courtIndex` position. (eg. king[0] = 0, lords[0] = 1, lords[1] = 2, etc.)
+
+#### runGameStateAction
+- `runGameStateAction(TrustusPacket calldata packet)`
+- `packet.payload` => `abi.encode(uint256 fid, uint256[4] allData, string actionType)`
+- Use this method to modify Game States defined below. Make sure that you pass data in a uint256[4] array, even if only first item is relevant (ie. `[newStormFee, 0, 0, 0]`)
+- `stormFee` => allData: `[stormFee, 0, 0, 0]`
+- `stormFrequency` => allData: `[stormFrequencyBlocks, 0, 0, 0]`
+- `kingProtection` => allData: `[kingProtectionBlocks, 0, 0, 0]`
+- `pointAllocation` => allData: `[indexOfNewPointAllocationTemplate, 0, 0, 0]`
+- `courtRoleOdds` => allData: `[1000, 2000, 3000, 4000]`
+
+#### redeem
+
+- `redeem()`
+- Used by players to collect portion of treasury based on pointsBalance.
 
 ### Court Roles
+#### Roles Numbered by Index (_Italics_ are stormable)
+0. None
+1. _King_
+2. _Lord_ (x2)
+3. _Knight_ (x3)
+4. _Townsfolk_ (x4)
+5. Custom1
+6. Custom2
+7. Custom3
+
+#### Court State View Methods
+
+- `court() returns (address[13])`
+- `king() returns (address[1])`
+- `lords() returns (address[2])`
+- `knights() returns (address[3])`
+- `townsfolk() returns (address[4])`
+- `custom1() returns (address[1])`
+- `custom2() returns (address[1])`
+- `custom3() returns (address[1])`
+
+#### Court Query View Methods
+
+- `determineCourtRole(address accountAddress, uint256 _randomSeed) returns (CourtRole)`
+- `getCourtRoleFromCourtIndex(uint256 index) returns (CourtRole)`
+- `getCourtRoleIndexes(CourtRole courtRole) returns (uint256 start, uint256 end)`
+- `indexOfAddressInRole(CourtRole courtRole, address accountAddress) returns (uint256)`
+- `getIndexOfAddressInCourt(address accountAddress) returns (int256)`
+- `findCourtRole(address accountAddress, CourtRole desiredCourtRole) returns (uint256)`
+
+### Points
+
+#### Point Allocation Templates Numbered by Index (10_000 bps: eg. 3100 = 31%)
+
+0. Custom => `[3100, 1400 (x2), 600 (x3), 350 (x4), 300, 300, 300]`
+1. Greedy => `[4900, 1300 (x2), 500 (x3), 250 (x4), 0, 0, 0]`
+2. Military => `[3100, 1400 (x2), 900 (x3), 350 (x4), 0, 0, 0]`
+3. Peoples => `[2400, 1500 (x2), 800 (x3), 550 (x4), 0, 0, 0]`
+4. Dead => `[0, 1400 (x2), 1900 (x3), 375 (x4), 0, 0, 0]`
+
+
+#### Point Query Methods
+
+- `pointsBalance(address) returns (uint256)` // Points since last court refresh
+- `getPoints(address accountAddress) returns (uint256)` // Realtime points
+- `getCourtMemberPoints() returns (uint256[13] memory)` // Realtime points for entire court
+- `calculatePointsEarned(CourtRole courtRole, uint256 startBlock) returns (uint256)`
+- `convertPointsToAssets(uint256 points) returns (uint256)`
+- `getPointsPerBlock(CourtRole courtRole) returns (uint256)`
+- `totalPoints() returns (uint256)`
+- `activePointAllocationTemplate() returns (PointAllocationTemplate)`
+- `pointAllocationTemplates(PointAllocationTemplate) returns (uint256[7])`
+- `getCourtRolePointAllocation(CourtRole courtRole, PointAllocationTemplate pointAllocationTemplate) returns (uint256)`
+- `getActiveCourtRolePointAllocation(CourtRole courtRole) returns (uint256)`
+
+### Events
+
+#### StormTheCastle
 ```solidity
-enum CourtRole {
-        None,
-        King,
-        Lord,
-        Knight,
-        Townsfolk
-    }
+    event StormTheCastle(
+        address indexed accountAddress,
+        uint8 indexed courtRole,
+        address indexed outAddress,
+        uint256 fid
+    );
 ```
-Returns as a uint8, so King = 1, Townsfolk = 4, etc.
-
-Use: 
+#### Game State Action
 ```solidity
-function determineCourtRole(address accountAddress, uint256 _randomSeed) public pure returns (CourtRole)`
+    event GameStateAction(
+        address indexed accountAddress,
+        uint256 indexed fid,
+        string actionType
+    );
 ```
-to get the CourtRole making sure the `accountAddress` is the address that will be submitting the transaction.
-* `_randomSeed` should be generated in the frame once and same number should be passed to both `determineCourtRole()` & `stormTheCastle()`
-### Storm
-To play the game: `stormTheCastle(uint256 _randomSeed, uint256 _fid)` - Costs ~825k gas
-
-Total number of players can be pulled from blockchain by calling `storms()` which `returns (uint256)`
-
-### Event
+#### Court Role Action
 ```solidity
-event StormTheCastle(address indexed accountAddress, uint8 indexed courtRole, uint256 indexed amountSent, uint256 fid);
+    event CourtRoleAction(
+        address indexed accountAddress,
+        address indexed inAddress,
+        address indexed outAddress,
+        uint256 fid
+    );
 ```
-is emitted on successful storm.
 
-Hash: `0xd1611e3a49d370878089b825553ec2e240770ea33b54c67ebbf637fc567be8df`
+### Add to Treasury
 
-### Court State
-```solidity
-    // Court
-    address[1] public king;
-    address[2] public lords;
-    address[3] public knights;
-    address[4] public townsfolk;
-```
-To get the current king use `contract.king(0)`, current lords `contract.lords(0)`, `contract.lords(1)`, etc.
+- Send ETH to the contract and it will convert and deposit to treasury (10% protocol fee taken)
+- Send DEGEN ERC20 token (0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed) directly to treasury with: `depositDegenToGameAssets(uint256 degenAmountWei)` method. Make sure you `approve` the `degenAmountWei` of degens tokens to the kingOfTheDegens contract address first. (No protocol fee is taken)
 
-### Storm block
-You can get the last block that an address stormed the castle using `contract.stormBlock(address)`. The contract will not allow an address to storm more than once every 1800 blocks.
+### OnlyOwner Methods
 
-### Deposit Degen
-You can add degen tokens (`0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed`) to the rewards pool by calling the `depositDegenToGameAssets(uint256 degenAmountWei)` method on the kingOfTheDegens contract. You will need to `approve` the `degenAmountWei` of degens tokens to the kingOfTheDegens contract address before calling this method. No protocol fee is taken.
+#### Protocol Fees
+- `collectProtocolFees()`
+- `protocolRedeem()`
+
+#### Game State
+- `setStormFrequency(uint256 blocks)`
+- `setStormFee(uint256 _stormFee)`
+- `setKingProtectionBlocks(uint256 _kingProtectionBlocks)`
+- `setCourtRoleOdds(uint256[4] memory _courtRoleOdds)`
+- `setActivePointAllocationTemplate(PointAllocationTemplate _pointAllocationTemplate)`
+
+#### Court Members
+- `swapCourtMember(address accountAddress, uint256 courtIndex)`
+- `rotateInCourtMember(address accountAddress, CourtRole courtRole)`
+
+#### Game Settings
+- `setProtocolFeePercent(uint256 _protocolFeePercent)` // 10_000 bps eg. 1000 = 10%
+- `setPointAllocationTemplates(uint256[7][5] _pointAllocationTemplates)`
+- `setIsTrusted(address trustedAddress, bool isTrusted)`
+- `togglePause()`
+
+#### Risky Game State - Avoid These - Only Use to Sync with Offchain State
+- `setGameDurationBlocks(uint256 blocks)`
+- `setGameAssets(uint256 _gameAssets)`
+- `setTotalPointsPerBlock(uint256 _totalPointsPerBlock)`
+- `setPointsBalance(address accountAddress, uint256 points)`
+- `setRoleStartBlock(address accountAddress, uint256 blockNumber)`
+- `setStormBlock(address accountAddress, uint256 blockNumber)`

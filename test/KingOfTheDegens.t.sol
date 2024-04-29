@@ -51,6 +51,19 @@ contract KingOfTheDegensTest is Test {
         string actionType;
     }
 
+    struct CourtRoleActionResults {
+        address accountAddress;
+        address inAddress;
+        address outAddress;
+        uint256 fid;
+    }
+
+    struct GameStateActionResults {
+        address accountAddress;
+        uint256 fid;
+        string actionType;
+    }
+
     struct RedeemResults {
         address accountAddress;
         uint256 amountRedeemed;
@@ -262,6 +275,141 @@ contract KingOfTheDegensTest is Test {
         comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Dead);
     }
 
+    function test_GameStateActionStormFee() public {
+        // Don't need to actually be on court so no reason to storm here
+        GameStateActionResults memory gameStateActionResults = doGameStateAction(
+            userAddress,
+            [uint256(1), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "stormFee"
+        );
+        assertEq(gameStateActionResults.fid, 42069);
+        assertEq(keccak256(abi.encodePacked(gameStateActionResults.actionType)), keccak256(abi.encodePacked("stormFee")));
+        assertEq(kingOfTheDegens.stormFee(), 1);
+    }
+
+    function test_GameStateActionStormFrequency() public {
+        // Don't need to actually be on court so no reason to storm here
+        GameStateActionResults memory gameStateActionResults = doGameStateAction(
+            userAddress,
+            [uint256(1), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "stormFrequency"
+        );
+        assertEq(gameStateActionResults.fid, 42069);
+        assertEq(keccak256(abi.encodePacked(gameStateActionResults.actionType)), keccak256(abi.encodePacked("stormFrequency")));
+        assertEq(kingOfTheDegens.stormFrequencyBlocks(), 1);
+    }
+
+    function test_GameStateActionKingProtection() public {
+        // Don't need to actually be on court so no reason to storm here
+        GameStateActionResults memory gameStateActionResults = doGameStateAction(
+            userAddress,
+            [uint256(1), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "kingProtection"
+        );
+        assertEq(gameStateActionResults.fid, 42069);
+        assertEq(keccak256(abi.encodePacked(gameStateActionResults.actionType)), keccak256(abi.encodePacked("kingProtection")));
+        assertEq(kingOfTheDegens.kingProtectionBlocks(), 1);
+    }
+
+    function test_GameStateActionPointAllocation() public {
+        // Don't need to actually be on court so no reason to storm here
+        GameStateActionResults memory gameStateActionResults = doGameStateAction(
+            userAddress,
+            [uint256(4), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(gameStateActionResults.fid, 42069);
+        assertEq(keccak256(abi.encodePacked(gameStateActionResults.actionType)), keccak256(abi.encodePacked("pointAllocation")));
+        assertEq(uint8(kingOfTheDegens.activePointAllocationTemplate()), uint8(4));
+    }
+
+    function testFail_GameStateActionPointAllocation() public {
+        // Don't need to actually be on court so no reason to storm here
+        // Invalid pointAllocationTemplate index
+        doGameStateAction(
+            userAddress,
+            [uint256(5), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+    }
+
+    function test_GameStateActionCourtRoleOdds() public {
+        // Don't need to actually be on court so no reason to storm here
+        uint256[4] memory newOdds = [uint256(1000), uint256(2000), uint256(3000), uint256(4000)];
+        GameStateActionResults memory gameStateActionResults = doGameStateAction(
+            userAddress,
+            newOdds,
+            42069,
+            "courtRoleOdds"
+        );
+        assertEq(gameStateActionResults.fid, 42069);
+        assertEq(keccak256(abi.encodePacked(gameStateActionResults.actionType)), keccak256(abi.encodePacked("courtRoleOdds")));
+        uint256[3] memory calculatedCeilings = calculateCourtRoleOddsCeilings(newOdds);
+        assertEq(kingOfTheDegens.courtRoleOddsCeilings(0), calculatedCeilings[0]);
+        assertEq(kingOfTheDegens.courtRoleOddsCeilings(1), calculatedCeilings[1]);
+        assertEq(kingOfTheDegens.courtRoleOddsCeilings(2), calculatedCeilings[2]);
+    }
+
+    function testFail_GameStateActionCourtRoleOdds() public {
+        // Don't need to actually be on court so no reason to storm here
+        // Invalid courtRoleOdds
+        doGameStateAction(
+            userAddress,
+            [uint256(9000), uint256(2000), uint256(3000), uint256(4000)],
+            42069,
+            "courtRoleOdds"
+        );
+    }
+
+    function test_CourtRoleActionSwapUser() public {
+        // Assume userAddress is King swap altUserAddress to Custom1 role
+        (uint256 targetCourtIndex, ) = kingOfTheDegens.getCourtRoleIndexes(KingOfTheDegens.CourtRole.Custom1);
+        CourtRoleActionResults memory courtRoleActionResults = doCourtRoleAction(
+            userAddress,
+            altUserAddress,
+            targetCourtIndex,
+            42069
+        );
+        assertEq(courtRoleActionResults.inAddress, altUserAddress);
+        assertEq(courtRoleActionResults.outAddress, address(0));
+        assertEq(kingOfTheDegens.custom1()[0], altUserAddress);
+        assertEq(uint8(kingOfTheDegens.courtRoles(altUserAddress)), uint8(KingOfTheDegens.CourtRole.Custom1));
+        // Do something silly like swap jester and king
+        (uint256 targetCourtIndex2, ) = kingOfTheDegens.getCourtRoleIndexes(KingOfTheDegens.CourtRole.King);
+        address oldKing = kingOfTheDegens.king()[0];
+        CourtRoleActionResults memory courtRoleActionResults2 = doCourtRoleAction(
+            userAddress,
+            altUserAddress,
+            targetCourtIndex2,
+            42069
+        );
+        assertEq(courtRoleActionResults2.inAddress, altUserAddress);
+        assertEq(courtRoleActionResults2.outAddress, oldKing);
+        assertEq(kingOfTheDegens.custom1()[0], oldKing);
+        assertEq(uint8(kingOfTheDegens.courtRoles(oldKing)), uint8(KingOfTheDegens.CourtRole.Custom1));
+        assertEq(kingOfTheDegens.king()[0], altUserAddress);
+        assertEq(uint8(kingOfTheDegens.courtRoles(altUserAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        // Or kick the king off the court and put myself there
+        (uint256 targetCourtIndex3, ) = kingOfTheDegens.getCourtRoleIndexes(KingOfTheDegens.CourtRole.King);
+        address oldKing2 = kingOfTheDegens.king()[0];
+        CourtRoleActionResults memory courtRoleActionResults3 = doCourtRoleAction(
+            userAddress,
+            userAddress,
+            targetCourtIndex3,
+            42069
+        );
+        assertEq(courtRoleActionResults3.inAddress, userAddress);
+        assertEq(courtRoleActionResults3.outAddress, oldKing2);
+        assertEq(kingOfTheDegens.king()[0], userAddress);
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        assertEq(uint8(kingOfTheDegens.courtRoles(oldKing2)), uint8(KingOfTheDegens.CourtRole.None));
+    }
+
     function test_PointsHelper() public {
         doStorm(userAddress, userAddressKingSeed, 0);
         uint256[13] memory courtPoints = kingOfTheDegens.getCourtMemberPoints();
@@ -459,6 +607,32 @@ contract KingOfTheDegensTest is Test {
         return processActionLogs();
     }
 
+    function doGameStateAction(address accountAddress, uint256[4] memory allData, uint256 fid, string memory actionType) internal returns (GameStateActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(
+            keccak256(abi.encodePacked("runGameStateAction(TrustusPacket)")),
+            abi.encode(fid, allData, actionType),
+            accountAddress == address(1010)
+        );
+        uint256 playAmount = kingOfTheDegens.stormFee();
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.runGameStateAction{value: playAmount}(trustusPacket);
+        return processGameStateActionLogs();
+    }
+
+    function doCourtRoleAction(address accountAddress, address replaceAddress, uint256 courtIndex, uint256 fid) internal returns (CourtRoleActionResults memory) {
+        Trustus.TrustusPacket memory trustusPacket = buildPacket(
+            keccak256(abi.encodePacked("runCourtRoleAction(TrustusPacket)")),
+            abi.encode(fid, replaceAddress, courtIndex),
+            accountAddress == address(1010)
+        );
+        uint256 playAmount = kingOfTheDegens.stormFee();
+        vm.recordLogs();
+        hoax(accountAddress);
+        kingOfTheDegens.runCourtRoleAction{value: playAmount}(trustusPacket);
+        return processCourtRoleActionLogs();
+    }
+
     function processActionLogs() internal returns (ActionResults memory) {
         Vm.Log[] memory entries = vm.getRecordedLogs();
 
@@ -474,6 +648,41 @@ contract KingOfTheDegensTest is Test {
             address(uint160(uint256(entries[eventTopic].topics[2]))),
             uint256(entries[eventTopic].topics[3]),
             abi.decode(entries[eventTopic].data, (string))
+        );
+    }
+
+    function processGameStateActionLogs() internal returns (GameStateActionResults memory) {
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        uint256 eventTopic = 0;
+        for (uint256 i = 0; i < entries.length; i++) {
+            if (entries[i].topics[0] == keccak256("GameStateAction(address,uint256,string)")) {
+                eventTopic = i;
+            }
+        }
+
+        return GameStateActionResults(
+            address(uint160(uint256(entries[eventTopic].topics[1]))),
+            uint256(entries[eventTopic].topics[2]),
+            abi.decode(entries[eventTopic].data, (string))
+        );
+    }
+
+    function processCourtRoleActionLogs() internal returns (CourtRoleActionResults memory) {
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        uint256 eventTopic = 0;
+        for (uint256 i = 0; i < entries.length; i++) {
+            if (entries[i].topics[0] == keccak256("CourtRoleAction(address,address,address,uint256)")) {
+                eventTopic = i;
+            }
+        }
+
+        return CourtRoleActionResults(
+            address(uint160(uint256(entries[eventTopic].topics[1]))),
+            address(uint160(uint256(entries[eventTopic].topics[2]))),
+            address(uint160(uint256(entries[eventTopic].topics[3]))),
+            abi.decode(entries[eventTopic].data, (uint256))
         );
     }
 
@@ -561,6 +770,14 @@ contract KingOfTheDegensTest is Test {
 
     function getProtocolFee(uint256 amountIn) internal view returns (uint256) {
         return (amountIn * kingOfTheDegens.protocolFeePercent()) / 10_000;
+    }
+
+    function calculateCourtRoleOddsCeilings(uint[4] memory _courtRoleOdds) internal pure returns (uint256[3] memory) {
+        uint256[3] memory _courtRoleOddsCeilings;
+        _courtRoleOddsCeilings[0] = _courtRoleOdds[0];
+        _courtRoleOddsCeilings[1] = _courtRoleOddsCeilings[0] + _courtRoleOdds[1];
+        _courtRoleOddsCeilings[2] = _courtRoleOddsCeilings[1] + _courtRoleOdds[2];
+        return _courtRoleOddsCeilings;
     }
     
     receive() external payable {}

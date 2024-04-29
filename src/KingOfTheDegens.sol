@@ -11,16 +11,16 @@ import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
 import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
 contract KingOfTheDegens is Owned, Pausable, Trustus {
+    uint256 public immutable redeemAfterGameEndedBlocks;
     uint256 public gameDurationBlocks;
     uint256 public stormFee;
     uint256 public protocolFeePercent;
     uint256 public stormFrequencyBlocks;
-    uint256 public immutable redeemAfterGameEndedBlocks;
-    uint256 public immutable totalPointsPerBlock = 1e18;
+    uint256 public totalPointsPerBlock = 1e18;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
     address public immutable WETH = 0x4200000000000000000000000000000000000006;
-    IV3SwapRouter swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
-    IUniswapV3Pool degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
+    IV3SwapRouter constant swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
+    IUniswapV3Pool constant degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     mapping(PointAllocationTemplate => uint256[7]) public pointAllocationTemplates;
     PointAllocationTemplate public activePointAllocationTemplate;
     mapping(address => uint256) public stormBlock;
@@ -87,12 +87,9 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error InsufficientFunds(uint256 valueSent);
     error TooFrequentStorms(uint256 nextBlockAllowed, uint256 currentBlockNumber);
     error AlreadyCourtMember(address accountAddress, CourtRole courtRole);
-    error BadCourtRole(CourtRole courtRole);
     error InsufficientBalance();
-    error CourtRoleMismatch(address accountAddress, CourtRole courtRole, CourtRole expectedCourtRole);
     error InvalidPercentage(uint256 percentageTotal);
     error RequiresCourtRole(CourtRole courtRole, CourtRole actualCourtRole);
-    error InvalidPointAllocationTemplate(PointAllocationTemplate pointAllocationTemplate);
     error BadGameStateAction(string actionType);
 
     constructor(
@@ -141,13 +138,13 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         (randomSeed, fid) = abi.decode(packet.payload, (uint256,uint256));
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
-        address outAddress = replaceCourtMember(msg.sender, courtRole);
-        depositToTreasury(msg.value);
+        address outAddress = _rotateInCourtMember(msg.sender, courtRole);
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks
         stormBlock[msg.sender] = block.number;
         emit StormTheCastle(msg.sender, uint8(courtRole), outAddress, fid);
+        depositToTreasury(msg.value);
     }
 
     function redeem() public virtual whenNotPaused {
@@ -156,7 +153,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         if (degenToken.balanceOf(address(this)) == 0) revert RedeemEnded();
         // Close out stream if this user still in court
         if (courtRoles[msg.sender] != CourtRole.None && roleStartBlock[msg.sender] < gameEndBlock()) {
-            updatePointsBalance(msg.sender, courtRoles[msg.sender]);
+            _updatePointsBalance(msg.sender, courtRoles[msg.sender]);
         }
         if (pointsBalance[msg.sender] == 0) revert InsufficientBalance();
         uint256 degenToSend = convertPointsToAssets(pointsBalance[msg.sender]);
@@ -166,42 +163,23 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         pointsBalance[msg.sender] = 0;
     }
 
-    function depositDegenToGameAssets(uint256 degenAmountWei) public {
-        gameAssets += degenAmountWei;
-        SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
-    }
-
     // Generic action methods
 
     function runCourtRoleAction(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("runCourtRoleAction(TrustusPacket)")), packet) whenNotPaused() {
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
-        uint256 fid;
-        address inAddress;
-        uint8 courtRoleIndex;
-        uint256 courtIndex;
-        (inAddress, courtRoleIndex, courtIndex) = abi.decode(packet.payload, (address,uint8, uint256));
-        CourtRole courtRole = CourtRole(courtRoleIndex);
-        address outAddress;
-        if (courtRoles[inAddress] != CourtRole.None) {
-            outAddress = court[courtIndex];
-            swapCourtMember(inAddress, outAddress);
-        } else {
-            outAddress = replaceCourtMember(inAddress, courtRole);
-        }
+        (uint256 fid, address replaceAddress, uint256 courtIndex) = abi.decode(packet.payload, (uint256, address, uint256));
+        address outAddress = _swapCourtMember(replaceAddress, courtIndex);
+        emit CourtRoleAction(msg.sender, replaceAddress, outAddress, fid);
         depositToTreasury(msg.value);
-        emit CourtRoleAction(msg.sender, inAddress, outAddress, fid);
     }
 
     function runGameStateAction(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("runGameStateAction(TrustusPacket)")), packet) whenNotPaused() {
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
-        uint256 fid;
-        uint256[4] memory allData;
-        string memory actionType;
-        (fid, allData, actionType) = abi.decode(packet.payload, (uint256, uint256[4], string));
+        (uint256 fid, uint256[4] memory allData, string memory actionType) = abi.decode(packet.payload, (uint256, uint256[4], string));
         if (keccak256(abi.encodePacked(actionType)) == keccak256(abi.encodePacked("stormFee"))) {
             stormFee = allData[0];
         } else if (keccak256(abi.encodePacked(actionType)) == keccak256(abi.encodePacked("stormFrequency"))) {
@@ -215,30 +193,22 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         } else {
             revert BadGameStateAction(actionType);
         }
-        depositToTreasury(msg.value);
         emit GameStateAction(msg.sender, fid, actionType);
+        depositToTreasury(msg.value);
     }
 
-    // OLD DONT USE COURT SPECIFIC METHODS
+    // OLD -> USE GENERIC METHODS ABOVE
 
     // KING
     function setJesterRole(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("setJesterRole(TrustusPacket)")), packet) whenNotPaused() {
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
-        address newJester;
-        uint256 fid;
-        (newJester, fid) = abi.decode(packet.payload, (address,uint256));
-        address outAddress;
-        if (courtRoles[newJester] != CourtRole.None) {
-            address oldJester = custom1()[0];
-            outAddress = oldJester;
-            swapCourtMember(newJester, oldJester);
-        } else {
-            outAddress = replaceCourtMember(newJester, CourtRole.Custom1);
-        }
-        depositToTreasury(msg.value);
+        (address newJester, uint256 fid) = abi.decode(packet.payload, (address,uint256));
+        (uint256 jesterIndex,) = getCourtRoleIndexes(CourtRole.Custom1);
+        address outAddress = _swapCourtMember(newJester, jesterIndex);
         emit Action(msg.sender, outAddress, fid, "setJesterRole");
+        depositToTreasury(msg.value);
     }
 
     function setPointStrategy(
@@ -249,8 +219,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         _pointAllocationTemplate = abi.decode(packet.payload, (uint8));
         PointAllocationTemplate pointAllocationTemplate = PointAllocationTemplate(_pointAllocationTemplate);
         _setActivePointAllocationTemplate(pointAllocationTemplate);
-        depositToTreasury(msg.value);
         emit Action(msg.sender, address(0), _pointAllocationTemplate, "setPointsStrategy");
+        depositToTreasury(msg.value);
     }
 
     // LORD
@@ -260,9 +230,9 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
         uint256 _stormFee;
         _stormFee = abi.decode(packet.payload, (uint256));
-        depositToTreasury(msg.value);
         stormFee = _stormFee;
         emit Action(msg.sender, address(0), _stormFee, "setStormFee");
+        depositToTreasury(msg.value);
     }
 
     // KNIGHT
@@ -273,13 +243,13 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
         bool _kingIsDead;
         _kingIsDead = abi.decode(packet.payload, (bool));
-        depositToTreasury(msg.value);
         address outAddress;
         if (_kingIsDead) {
             _setActivePointAllocationTemplate(PointAllocationTemplate.Dead);
             outAddress = king()[0];
         }
         emit Action(msg.sender, outAddress, _kingIsDead ? 1 : 0, "attackKing");
+        depositToTreasury(msg.value);
     }
 
     // Public View Helper Methods
@@ -372,8 +342,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     function convertPointsToAssets(uint256 points) public view returns (uint256) {
         // Ensure points is not too large to cause overflow
         assert(points <= type(uint256).max / 1e18);
-        uint256 pointsAdjusted = points * 1e18;
-        uint256 percentage = pointsAdjusted / totalPoints();
+        uint256 percentage = (points * 1e18) / totalPoints();
         return (totalAssets() * percentage) / 1e18;
     }
 
@@ -390,7 +359,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     function getCourtMemberPoints() public view returns (uint256[13] memory) {
         uint256[13] memory points;
-        for (uint256 i = 0;i < court.length;i++) {
+        uint256 courtLength = court.length;
+        for (uint256 i = 0;i < courtLength;i++) {
             points[i] = getPoints(court[i]);
         }
         return points;
@@ -451,7 +421,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return [court[start]];
     }
 
-    function getCourtRoleFromAddressesIndex(uint256 index) public view returns (CourtRole) {
+    function getCourtRoleFromCourtIndex(uint256 index) public view returns (CourtRole) {
         if (index <= roleIndexCeiling[CourtRole.King]) {
             return CourtRole.King;
         } else if (index <= roleIndexCeiling[CourtRole.Lord]) {
@@ -468,6 +438,16 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             return CourtRole.Custom3;
         }
         return CourtRole.None;
+    }
+
+    function getIndexOfAddressInCourt(address accountAddress) public view returns (int256) {
+        uint256 courtLength = court.length;
+        for(uint i = 0; i < courtLength; i++) {
+            if (court[i] == accountAddress) {
+                return int256(i);
+            }
+        }
+        return -1;
     }
 
     function getCourtRoleIndexes(CourtRole courtRole) public view returns (uint256 start, uint256 end) {
@@ -509,7 +489,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     // Internal Methods
 
-    function replaceCourtMember(address accountAddress, CourtRole courtRole) internal returns(address) {
+    function _rotateInCourtMember(address accountAddress, CourtRole courtRole) internal returns (address) {
         // Rotate In
         (uint256 start, uint256 end) = getCourtRoleIndexes(courtRole);
         address outAddress = court[start];
@@ -518,37 +498,40 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         }
         court[end] = accountAddress;
         // Set Court Roles
-        updateCourtRole(accountAddress, courtRole);
-        updateCourtRole(outAddress, CourtRole.None);
+        courtRoles[accountAddress] = courtRole;
+        courtRoles[outAddress] = CourtRole.None;
         // Update Points Balance outAddress
-        updatePointsBalance(outAddress, courtRole);
+        _updatePointsBalance(outAddress, courtRole);
         // Update Role Start Block for accountAddress
-        updateRoleStartBlock(accountAddress);
+        roleStartBlock[accountAddress] = block.number;
         return outAddress;
     }
 
-    function swapCourtMember(address address1, address address2) internal {
-        CourtRole courtRole1 = courtRoles[address1];
-        CourtRole courtRole2 = courtRoles[address2];
-        // Update Points Balance on both addresses to close out old role
-        updatePointsBalance(address1, courtRole1);
-        updatePointsBalance(address2, courtRole2);
-        // Find index
-        uint256 index1 = indexOfAddressInRole(courtRole1, address1);
-        uint256 index2 = indexOfAddressInRole(courtRole2, address2);
-        (uint256 start1,) = getCourtRoleIndexes(courtRole1);
-        (uint256 start2,) = getCourtRoleIndexes(courtRole2);
-        // Swap roles
-        court[start1 + index1] = address2;
-        court[start2 + index2] = address1;
-        // Update court role mapping
-        updateCourtRole(address1, courtRole2);
-        updateCourtRole(address2, courtRole1);
+    function _swapCourtMember(address replaceAddress, uint256 targetCourtIndex) internal returns (address) {
+        address targetAddress = court[targetCourtIndex];
+        CourtRole targetCourtRole = getCourtRoleFromCourtIndex(targetCourtIndex);
+        CourtRole replaceCourtRole = courtRoles[replaceAddress];
+        // Close out points with old roles
+        _updatePointsBalance(replaceAddress, replaceCourtRole);
+        _updatePointsBalance(targetAddress, targetCourtRole);
+        // Find replaceAddress courtIndex
+        int256 replaceCourtIndex = getIndexOfAddressInCourt(replaceAddress);
+        // Swap Roles
+        if (replaceCourtIndex > -1) {
+            court[uint256(replaceCourtIndex)] = court[targetCourtIndex];
+        }
+        court[targetCourtIndex] = replaceAddress;
+        // Update courtRoles
+        courtRoles[replaceAddress] = targetCourtRole;
+        courtRoles[targetAddress] = replaceCourtRole;
+
+        return targetAddress;
     }
 
     function restartCourtStreams() internal {
-        for (uint256 i = 0;i < court.length;i++) {
-            updatePointsBalance(court[i], getCourtRoleFromAddressesIndex(i));
+        uint256 courtLength = court.length;
+        for (uint256 i = 0;i < courtLength;i++) {
+            _updatePointsBalance(court[i], getCourtRoleFromCourtIndex(i));
         }
     }
 
@@ -580,20 +563,12 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     // Internal helpers
 
-    function updateRoleStartBlock(address accountAddress) internal {
-        roleStartBlock[accountAddress] = block.number;
-    }
-
-    function updatePointsBalance(address accountAddress, CourtRole courtRole) internal {
+    function _updatePointsBalance(address accountAddress, CourtRole courtRole) internal {
         pointsBalance[accountAddress] += calculatePointsEarned(
             courtRole,
             roleStartBlock[accountAddress]
         );
-        updateRoleStartBlock(accountAddress);
-    }
-
-    function updateCourtRole(address accountAddress, CourtRole courtRole) internal {
-        courtRoles[accountAddress] = courtRole;
+        roleStartBlock[accountAddress] = block.number;
     }
 
     function _setCourtRoleOddsCeilings(uint256[4] memory _courtRoleOdds) internal {
@@ -616,6 +591,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
                                 _pointAllocationTemplates[i][6];
             if (total != 10_000) revert InvalidPercentage(total);
             pointAllocationTemplates[PointAllocationTemplate(i)] = _pointAllocationTemplates[i];
+            if (isGameStarted()) {
+                // Need to restart streams for existing court members
+                restartCourtStreams();
+            }
         }
     }
 
@@ -642,16 +621,16 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         uint256 _startBlock
     ) public onlyOwner {
         // Starting court
-        replaceCourtMember(_king[0], CourtRole.King);
-        replaceCourtMember(_lords[0], CourtRole.Lord);
-        replaceCourtMember(_lords[1], CourtRole.Lord);
-        replaceCourtMember(_knights[0], CourtRole.Knight);
-        replaceCourtMember(_knights[1], CourtRole.Knight);
-        replaceCourtMember(_knights[2], CourtRole.Knight);
-        replaceCourtMember(_townsfolk[0], CourtRole.Townsfolk);
-        replaceCourtMember(_townsfolk[1], CourtRole.Townsfolk);
-        replaceCourtMember(_townsfolk[2], CourtRole.Townsfolk);
-        replaceCourtMember(_townsfolk[3], CourtRole.Townsfolk);
+        _rotateInCourtMember(_king[0], CourtRole.King);
+        _rotateInCourtMember(_lords[0], CourtRole.Lord);
+        _rotateInCourtMember(_lords[1], CourtRole.Lord);
+        _rotateInCourtMember(_knights[0], CourtRole.Knight);
+        _rotateInCourtMember(_knights[1], CourtRole.Knight);
+        _rotateInCourtMember(_knights[2], CourtRole.Knight);
+        _rotateInCourtMember(_townsfolk[0], CourtRole.Townsfolk);
+        _rotateInCourtMember(_townsfolk[1], CourtRole.Townsfolk);
+        _rotateInCourtMember(_townsfolk[2], CourtRole.Townsfolk);
+        _rotateInCourtMember(_townsfolk[3], CourtRole.Townsfolk);
         // Set starting block
         gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
     }
@@ -667,6 +646,46 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         SafeTransferLib.safeTransfer(degenToken, msg.sender, degenToken.balanceOf(address(this)));
     }
 
+    // OnlyOwner helpers that simply mirror functionality in runGameStateAction method
+
+    function setStormFrequency(uint256 blocks) public onlyOwner {
+        stormFrequencyBlocks = blocks;
+    }
+
+    function setStormFee(uint256 _stormFee) public onlyOwner {
+        stormFee = _stormFee;
+    }
+
+    function setKingProtectionBlocks(uint256 _kingProtectionBlocks) public onlyOwner {
+        kingProtectionBlocks = _kingProtectionBlocks;
+    }
+
+    function setCourtRoleOdds(uint256[4] memory _courtRoleOdds) public onlyOwner {
+        _setCourtRoleOddsCeilings(_courtRoleOdds);
+    }
+
+    function setActivePointAllocationTemplate(PointAllocationTemplate _pointAllocationTemplate) public onlyOwner {
+        _setActivePointAllocationTemplate(_pointAllocationTemplate);
+    }
+
+    function swapCourtMember(address accountAddress, uint256 courtIndex) public onlyOwner {
+        _swapCourtMember(accountAddress, courtIndex);
+    }
+
+    function rotateInCourtMember(address accountAddress, CourtRole courtRole) public onlyOwner {
+        _rotateInCourtMember(accountAddress, courtRole);
+    }
+
+    // OnlyOwner change game settings
+
+    function setProtocolFeePercent(uint256 _protocolFeePercent) public onlyOwner {
+        protocolFeePercent = _protocolFeePercent;
+    }
+
+    function setPointAllocationTemplates(uint256[7][5] memory _pointAllocationTemplates) public onlyOwner {
+        _setPointAllocationTemplates(_pointAllocationTemplates);
+    }
+
     function setIsTrusted(address trustedAddress, bool isTrusted) public onlyOwner {
         _setIsTrusted(trustedAddress, isTrusted);
     }
@@ -679,36 +698,35 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         }
     }
 
-    function setStormFrequency(uint256 blocks) public onlyOwner {
-        stormFrequencyBlocks = blocks;
-    }
-
-    function setStormFee(uint256 _stormFee) public onlyOwner {
-        stormFee = _stormFee;
-    }
-
-    function setProtocolFeePercent(uint256 _protocolFeePercent) public onlyOwner {
-        protocolFeePercent = _protocolFeePercent;
-    }
-
-    function setKingProtectionBlocks(uint256 _kingProtectionBlocks) public onlyOwner {
-        kingProtectionBlocks = _kingProtectionBlocks;
-    }
-
-    function setCourtRoleOdds(uint256[4] memory _courtRoleOdds) public onlyOwner {
-        _setCourtRoleOddsCeilings(_courtRoleOdds);
-    }
+    // OnlyOwner modify game state
 
     function setGameDurationBlocks(uint256 blocks) public onlyOwner {
         gameDurationBlocks = blocks;
     }
 
-    function setPointAllocationTemplates(uint256[7][5] memory _pointAllocationTemplates) public onlyOwner {
-        _setPointAllocationTemplates(_pointAllocationTemplates);
+    function setGameAssets(uint256 _gameAssets) public onlyOwner {
+        gameAssets = _gameAssets;
     }
 
-    function setActivePointAllocationTemplate(PointAllocationTemplate _pointAllocationTemplate) public onlyOwner {
-        _setActivePointAllocationTemplate(_pointAllocationTemplate);
+    function setTotalPointsPerBlock(uint256 _totalPointsPerBlock) public onlyOwner {
+        totalPointsPerBlock = _totalPointsPerBlock;
+    }
+
+    function setPointsBalance(address accountAddress, uint256 points) public onlyOwner {
+        pointsBalance[accountAddress] = points;
+    }
+
+    function setRoleStartBlock(address accountAddress, uint256 blockNumber) public onlyOwner {
+        roleStartBlock[accountAddress] = blockNumber;
+    }
+
+    function setStormBlock(address accountAddress, uint256 blockNumber) public onlyOwner {
+        stormBlock[accountAddress] = blockNumber;
+    }
+
+    function depositDegenToGameAssets(uint256 degenAmountWei) public {
+        gameAssets += degenAmountWei;
+        SafeTransferLib.safeTransferFrom(degenToken, msg.sender, address(this), degenAmountWei);
     }
 
     receive() external payable {

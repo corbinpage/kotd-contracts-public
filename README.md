@@ -22,6 +22,8 @@
 - `kingProtection` => allData: `[kingProtectionBlocks, 0, 0, 0]`
 - `pointAllocation` => allData: `[indexOfNewPointAllocationTemplate, 0, 0, 0]`
 - `courtRoleOdds` => allData: `[1000, 2000, 3000, 4000]`
+- `attackKing` => allData: `[0, 0, 0, 0]`
+- `anyString` => allData `[0, 0, 0, 0]` // Will act as a pass thru, depositing to treasury but not changing any state
 
 #### redeem
 

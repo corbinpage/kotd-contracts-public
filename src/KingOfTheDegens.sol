@@ -191,7 +191,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         } else if (keccak256(abi.encodePacked(actionType)) == keccak256(abi.encodePacked("courtRoleOdds"))) {
             _setCourtRoleOddsCeilings(allData);
         } else {
-            revert BadGameStateAction(actionType);
+            // Do Nothing
         }
         emit GameStateAction(msg.sender, fid, actionType);
         depositToTreasury(msg.value);
@@ -239,7 +239,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     function attackKing(
         TrustusPacket calldata packet
     ) public payable verifyPacket(keccak256(abi.encodePacked("attackKing(TrustusPacket)")), packet) whenNotPaused() {
-        if (courtRoles[msg.sender] != CourtRole.Knight) revert RequiresCourtRole(CourtRole.Knight, courtRoles[msg.sender]);
         if (msg.value < stormFee) revert InsufficientFunds(msg.value);
         bool _kingIsDead;
         _kingIsDead = abi.decode(packet.payload, (bool));
@@ -364,6 +363,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
             points[i] = getPoints(court[i]);
         }
         return points;
+    }
+
+    function fullCourt() public view returns (address[13] memory) {
+        return court;
     }
 
     function king() public view returns (address[1] memory) {

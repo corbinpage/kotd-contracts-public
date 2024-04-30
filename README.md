@@ -41,7 +41,7 @@
 
 #### Court State View Methods
 
-- `court() returns (address[13])`
+- `fullCourt() returns (address[13])`
 - `king() returns (address[1])`
 - `lords() returns (address[2])`
 - `knights() returns (address[3])`
@@ -49,6 +49,7 @@
 - `custom1() returns (address[1])`
 - `custom2() returns (address[1])`
 - `custom3() returns (address[1])`
+- `court(uint256 courtIndex) returns (address)`
 
 #### Court Query View Methods
 

@@ -419,6 +419,15 @@ contract KingOfTheDegensTest is Test {
         assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
     }
 
+    function test_CourtHelper() public {
+        address[13] memory calculatedHelperAddresses;
+        for (uint256 i;i < calculateSum(roleCounts);i++) {
+            calculatedHelperAddresses[i] = kingOfTheDegens.court(i);
+        }
+        address[13] memory courtHelperAddresses = kingOfTheDegens.fullCourt();
+        assertEq(areCourtArraysEqual(calculatedHelperAddresses, courtHelperAddresses), true);
+    }
+
     function testFail_StormTheCastleBadPacket() public {
         doStorm(address(1010));
     }
@@ -778,6 +787,24 @@ contract KingOfTheDegensTest is Test {
         _courtRoleOddsCeilings[1] = _courtRoleOddsCeilings[0] + _courtRoleOdds[1];
         _courtRoleOddsCeilings[2] = _courtRoleOddsCeilings[1] + _courtRoleOdds[2];
         return _courtRoleOddsCeilings;
+    }
+
+    function calculateSum(uint[7] memory inputArray) public pure returns(uint) {
+        uint sum = 0;
+        uint len = inputArray.length;
+        for (uint i = 0; i < len; i++) {
+            sum += inputArray[i];
+        }
+        return sum;
+    }
+
+    function areCourtArraysEqual(address[13] memory array1, address[13] memory array2) public pure returns (bool) {
+        for(uint i = 0; i < 13; i++) {
+            if (array1[i] != array2[i]) {
+                return false;
+            }
+        }
+        return true;
     }
     
     receive() external payable {}

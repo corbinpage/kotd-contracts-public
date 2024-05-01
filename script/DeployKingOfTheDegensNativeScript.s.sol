@@ -11,11 +11,6 @@ contract DeployKingOfTheDegensNativeScript is DeployKingOfTheDegensScript {
 
     function newKingOfTheDegens() internal override returns (KingOfTheDegens) {
         return new KingOfTheDegensNative(
-            gameDurationBlocks,
-            stormFee,
-            protocolFeePercentage,
-            stormFrequencyBlocks,
-            redeemAfterGameEndedBlocks,
             courtRoleOdds,
             roleCounts,
             pointAllocationTemplates

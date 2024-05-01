@@ -8,11 +8,7 @@ import "forge-std/console.sol";
 contract DeployKingOfTheDegensScript is Script {
     KingOfTheDegens kingOfTheDegens;
     // Settings
-    uint256 public immutable gameDurationBlocks = 888300;
-    uint256 public immutable stormFee = 1e15;
-    uint256 public immutable protocolFeePercentage = 1000;
-    uint256 public immutable stormFrequencyBlocks = 1800;
-    uint256 public immutable redeemAfterGameEndedBlocks = 2592000;
+    uint256 public immutable gameDurationBlocks = 1339200;
     uint256[7][5] public pointAllocationTemplates = [
         [3100, 1400, 600, 350, 300, 300, 300],
         [4900, 1300, 500, 250, 0, 0, 0],
@@ -26,23 +22,21 @@ contract DeployKingOfTheDegensScript is Script {
     address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
 //    address public immutable newOwnerAddress = 0x6Ca74A32F864918a7399d37592438A80Ec7Ec8D9;
     // Starting Court
-    address[1] public king = [
-        0xB8D30eF08522BE6A80cC6cbCDf00BE0A9BCE814A
-    ];
+    address[1] public king = [0x2943E07Ca68FeBC79533d321F5D427136995ECB6];
     address[2] public lords = [
-        0xea24Ba5441F85F71236596888206B6861914AAD1,
-        0xE7874ea9AEe21E3EaDBEB8AFEDf0370067ef632C
+        0x0D9A5b29Db1A5d109a3f6E3D3D5141691461d44d,
+        0x7f35303825129989C8B20CF99bafA5E8563e05E6
     ];
     address[3] public knights = [
-        0x77B4922Fcc0Fa745Bcd7d76025E682CFfFc9a149,
-        0x869eC00FA1DC112917c781942Cc01c68521c415e,
-        0x1160E5E2D9D301a81cF5e9280174BB93DDcCd606
+        0x8C73622e3789d9d0297a9bEAC841bC9F153B1705,
+        0x8C50b29a763E2BabBb6b0AE8A1133D59a537e48c,
+        0xfFD680D72E71Bd125ee68E98e020beB43bc81D64
     ];
     address[4] public townsfolk = [
-        0xadA511478a5D5F7a5D8c59b5bb443a5452087d70,
-        0xBcf86ab45846E385fBC92BC8a8A598766af2c015,
-        0x8C2538fd519109CFBB1Db7e240ad9Df94fD05971,
-        0xF6Ee39EfDB14909Da1e5B6121c5c67bC1Cf0Db31
+        0xFE8E6bd85e0c0869f8bEe9e67398eB4088c92d07,
+        0x6f46d90553141D464C000D76e41d0d5380Fc0B23,
+        0x4a3e6E66f8C32bC05A50879f872B1177A1573CDF,
+        0x4b91475af6eC45997794b513349aADf7772De95a
     ];
 
     function run() public {
@@ -50,7 +44,7 @@ contract DeployKingOfTheDegensScript is Script {
         vm.startBroadcast(key);
         kingOfTheDegens = newKingOfTheDegens();
         console.log("KingOfTheDegens Game deployed to: %s", address(kingOfTheDegens));
-        startGame();
+        //startGame();
         // Set Trustus address
         kingOfTheDegens.setIsTrusted(trustedSignerAddress, true);
         console.log("Trustus signer added: %s", trustedSignerAddress);
@@ -60,11 +54,6 @@ contract DeployKingOfTheDegensScript is Script {
 
     function newKingOfTheDegens() internal virtual returns (KingOfTheDegens) {
         return new KingOfTheDegens(
-            gameDurationBlocks,
-            stormFee,
-            protocolFeePercentage,
-            stormFrequencyBlocks,
-            redeemAfterGameEndedBlocks,
             courtRoleOdds,
             roleCounts,
             pointAllocationTemplates
@@ -77,6 +66,7 @@ contract DeployKingOfTheDegensScript is Script {
             lords,
             knights,
             townsfolk,
+            gameDurationBlocks,
             0
         );
         console.log("Game started");

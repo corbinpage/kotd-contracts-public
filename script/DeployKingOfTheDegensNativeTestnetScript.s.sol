@@ -10,7 +10,7 @@ import "forge-std/console.sol";
 contract DeployKingOfTheDegensNativeTestnetScript is DeployKingOfTheDegensNativeScript {
 
     constructor() {
-        stormFrequencyBlocks = 1;
+        gameDurationBlocks = 3600;
         king = [address(1)];
         lords = [address(2), address(3)];
         knights = [address(4), address(5), address(6)];

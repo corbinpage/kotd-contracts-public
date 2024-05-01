@@ -8,28 +8,10 @@ contract KingOfTheDegensNative is KingOfTheDegens {
     uint256 public protocolFeeBalance;
 
     constructor(
-        uint256 _gameDurationBlocks,
-        uint256 _minPlayAmount,
-        uint256 _protocolFeePercent,
-        uint256 _stormFrequencyBlocks,
-        uint256 _redeemAfterGameEndedBlocks,
         uint256[4] memory _courtRoleOdds,
         uint256[7] memory _roleCounts,
         uint256[7][5] memory _pointAllocationTemplates
-    )
-    KingOfTheDegens(
-    _gameDurationBlocks,
-    _minPlayAmount,
-    _protocolFeePercent,
-    _stormFrequencyBlocks,
-    _redeemAfterGameEndedBlocks,
-    _courtRoleOdds,
-    _roleCounts,
-    _pointAllocationTemplates
-    )
-    {
-
-    }
+    ) KingOfTheDegens(_courtRoleOdds, _roleCounts, _pointAllocationTemplates) {}
 
     function redeem() public override whenNotPaused {
         if (isGameActive()) revert GameIsActive();

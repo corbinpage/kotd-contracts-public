@@ -11,18 +11,19 @@ import 'swap-router-contracts/interfaces/IV3SwapRouter.sol';
 import 'v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 
 contract KingOfTheDegens is Owned, Pausable, Trustus {
-    uint256 public immutable redeemAfterGameEndedBlocks;
+    uint256 public immutable redeemAfterGameEndedBlocks = 1296000;
     uint256 public gameDurationBlocks;
-    uint256 public stormFee;
-    uint256 public protocolFeePercent;
-    uint256 public stormFrequencyBlocks;
+    uint256 public stormFee = 1e15;
+    uint256 public protocolFeePercent = 1000;
+    uint256 public stormFrequencyBlocks = 1800;
     uint256 public totalPointsPerBlock = 1e18;
+    uint256 public kingProtectionBlocks = 10800;
     ERC20 public immutable degenToken = ERC20(0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed);
     address public immutable WETH = 0x4200000000000000000000000000000000000006;
     IV3SwapRouter constant swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
     IUniswapV3Pool constant degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     mapping(PointAllocationTemplate => uint256[7]) public pointAllocationTemplates;
-    PointAllocationTemplate public activePointAllocationTemplate;
+    PointAllocationTemplate public activePointAllocationTemplate = PointAllocationTemplate.Peoples;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
     mapping(address => uint256) public pointsBalance;
@@ -32,7 +33,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     uint256 public storms;
     uint256 public gameStartBlock;
     uint256 public gameAssets;
-    uint256 public kingProtectionBlocks = 10800;
     // Court
     address[13] public court;
     // Role
@@ -89,24 +89,12 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error AlreadyCourtMember(address accountAddress, CourtRole courtRole);
     error InsufficientBalance();
     error InvalidPercentage(uint256 percentageTotal);
-    error RequiresCourtRole(CourtRole courtRole, CourtRole actualCourtRole);
-    error BadGameStateAction(string actionType);
 
     constructor(
-        uint256 _gameDurationBlocks,
-        uint256 _stormFee,
-        uint256 _protocolFeePercent,
-        uint256 _stormFrequencyBlocks,
-        uint256 _redeemAfterGameEndedBlocks,
         uint256[4] memory _courtRoleOdds,
         uint256[7] memory _roleCounts,
         uint256[7][5] memory _pointAllocationTemplates
     ) Owned(msg.sender) {
-        gameDurationBlocks = _gameDurationBlocks;
-        stormFee = _stormFee;
-        protocolFeePercent = _protocolFeePercent;
-        stormFrequencyBlocks = _stormFrequencyBlocks;
-        redeemAfterGameEndedBlocks = _redeemAfterGameEndedBlocks;
         _setPointAllocationTemplates(_pointAllocationTemplates);
         _setCourtRoleOddsCeilings(_courtRoleOdds);
         // Calculate roleIndexCeiling and roleCounts based on _roleCounts
@@ -621,6 +609,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         address[2] calldata _lords,
         address[3] calldata _knights,
         address[4] calldata _townsfolk,
+        uint256 _gameDurationBlocks,
         uint256 _startBlock
     ) public onlyOwner {
         // Starting court
@@ -634,6 +623,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         _rotateInCourtMember(_townsfolk[1], CourtRole.Townsfolk);
         _rotateInCourtMember(_townsfolk[2], CourtRole.Townsfolk);
         _rotateInCourtMember(_townsfolk[3], CourtRole.Townsfolk);
+        // Duration
+        gameDurationBlocks = _gameDurationBlocks;
         // Set starting block
         gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
     }

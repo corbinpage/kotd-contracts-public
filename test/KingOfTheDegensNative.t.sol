@@ -11,11 +11,6 @@ contract KingOfTheDegensNativeTest is KingOfTheDegensTest {
     function setUp() public override {
         // Deploy
         kingOfTheDegens = new KingOfTheDegensNative(
-            gameDurationBlocks,
-            1e15,
-            protocolFeePercentage,
-            stormFrequencyBlocks,
-            redeemAfterGameEndedBlocks,
             courtRoleOdds,
             roleCounts,
             pointAllocationTemplates
@@ -26,6 +21,7 @@ contract KingOfTheDegensNativeTest is KingOfTheDegensTest {
             lords,
             knights,
             townsfolk,
+            gameDurationBlocks,
             0
         );
         // Set Trustus address

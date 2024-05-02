@@ -90,6 +90,7 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     error AlreadyCourtMember(address accountAddress, CourtRole courtRole);
     error InsufficientBalance();
     error InvalidPercentage(uint256 percentageTotal);
+    error ArrayLengthMismatch(uint256 length1, uint256 length2);
 
     constructor(
         uint256[4] memory _courtRoleOdds,
@@ -638,6 +639,22 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         gameDurationBlocks = _gameDurationBlocks;
         // Set starting block
         gameStartBlock = _startBlock > 0 ? _startBlock : block.number;
+    }
+
+    function initGameState(
+        uint256 _storms,
+        address[] memory _accountAddresses,
+        uint256[] memory _points,
+        uint256[] memory _stormBlocks
+    ) public onlyOwner {
+        //if (isGameActive()) revert GameIsActive();
+        if (_accountAddresses.length != _points.length) revert();
+        if (_stormBlocks.length != _points.length) revert();
+        storms = _storms;
+        for (uint256 i = 0;i < _accountAddresses.length;i++) {
+            pointsBalance[_accountAddresses[i]] = _points[i];
+            stormBlock[_accountAddresses[i]] = _stormBlocks[i];
+        }
     }
 
     function collectProtocolFees() public virtual onlyOwner {

@@ -161,7 +161,7 @@ contract KingOfTheDegensTest is Test {
     function test_FlowRates() public {
         StormResults memory stormResults = doStorm(userAddress, random(), 0);
         uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
-            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * gameDurationBlocks
+            kingOfTheDegens.calculatePointsEarned(stormResults.courtRole, block.number - gameDurationBlocks)
         );
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
@@ -183,13 +183,18 @@ contract KingOfTheDegensTest is Test {
         // Fast forward to end of game
         vm.roll(kingOfTheDegens.gameEndBlock());
         uint256 expectedUserAssets = kingOfTheDegens.convertPointsToAssets(
-            kingOfTheDegens.getPointsPerBlock(stormResults.courtRole) * kingOfTheDegens.kingProtectionBlocks()
+            kingOfTheDegens.calculatePointsEarned(
+                stormResults.courtRole,
+                block.number - kingOfTheDegens.kingProtectionBlocks()
+            )
         );
         doRedeem(userAddress);
         assertEq(userBalanceBefore + expectedUserAssets, getAddressBalance(userAddress));
         uint256 expectedAltUserAssets = kingOfTheDegens.convertPointsToAssets(
-            kingOfTheDegens.getPointsPerBlock(altStormResults.courtRole) *
-            (gameDurationBlocks - (kingOfTheDegens.kingProtectionBlocks() * 2))
+            kingOfTheDegens.calculatePointsEarned(
+                altStormResults.courtRole,
+                block.number - (gameDurationBlocks - kingOfTheDegens.kingProtectionBlocks() * 2)
+            )
         );
         doRedeem(altUserAddress);
         assertEq(altUserBalanceBefore + expectedAltUserAssets, getAddressBalance(altUserAddress));
@@ -217,26 +222,46 @@ contract KingOfTheDegensTest is Test {
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
         doStorm(userAddress, userAddressKingSeed, 0);
         assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        vm.roll(block.number + 10_000);
         ActionResults memory actionResults = doPointStrategy(
             userAddress,
             uint8(KingOfTheDegens.PointAllocationTemplate.Military)
         );
+        uint256 expectedUserAddressPoints = kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - 10_000,
+            kingOfTheDegens.defaultPointAllocationTemplate()
+        );
+        assertEq(kingOfTheDegens.pointsBalance(userAddress), expectedUserAddressPoints);
         assertEq(actionResults.outAddress, address(0));
         comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Military);
         comparePointAllocation(KingOfTheDegens.CourtRole.Lord, KingOfTheDegens.PointAllocationTemplate.Military);
         comparePointAllocation(KingOfTheDegens.CourtRole.Knight, KingOfTheDegens.PointAllocationTemplate.Military);
         comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, KingOfTheDegens.PointAllocationTemplate.Military);
         comparePointAllocation(KingOfTheDegens.CourtRole.Custom1, KingOfTheDegens.PointAllocationTemplate.Military);
+        vm.roll(block.number + 10_000);
         ActionResults memory actionResults2 = doPointStrategy(
             userAddress,
             uint8(KingOfTheDegens.PointAllocationTemplate.Peoples)
         );
+        expectedUserAddressPoints += kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - 10_000,
+            KingOfTheDegens.PointAllocationTemplate.Military
+        );
+        assertEq(kingOfTheDegens.pointsBalance(userAddress), expectedUserAddressPoints);
         assertEq(actionResults2.outAddress, address(0));
         comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Peoples);
         comparePointAllocation(KingOfTheDegens.CourtRole.Lord, KingOfTheDegens.PointAllocationTemplate.Peoples);
         comparePointAllocation(KingOfTheDegens.CourtRole.Knight, KingOfTheDegens.PointAllocationTemplate.Peoples);
         comparePointAllocation(KingOfTheDegens.CourtRole.Townsfolk, KingOfTheDegens.PointAllocationTemplate.Peoples);
         comparePointAllocation(KingOfTheDegens.CourtRole.Custom1, KingOfTheDegens.PointAllocationTemplate.Peoples);
+        vm.roll(kingOfTheDegens.gameEndBlock());
+        expectedUserAddressPoints += kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - (kingOfTheDegens.gameEndBlock() - block.number),
+            KingOfTheDegens.PointAllocationTemplate.Peoples
+        );
     }
 
     function testFail_SetPointStrategy() public {
@@ -262,17 +287,85 @@ contract KingOfTheDegensTest is Test {
     }
 
     function test_AttackKing() public {
+        // Roll a knight
+        doStorm(userAddress, userAddressKnightSeed, 0);
+        assertEq(uint8(kingOfTheDegens.courtRoles(userAddress)), uint8(KingOfTheDegens.CourtRole.Knight));
+        // Attack King - Below threshold
+        doAttackKing(userAddress, false);
+        // Point Template should remain unchanged
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(kingOfTheDegens.defaultPointAllocationTemplate())
+        );
+        // Fast forward kingProtection() blocks
         vm.roll(block.number + kingOfTheDegens.kingProtectionBlocks());
-        StormResults memory stormResults = doStorm(userAddress, userAddressKnightSeed, 0);
-        assertEq(uint8(stormResults.courtRole), uint8(KingOfTheDegens.CourtRole.Knight));
-        ActionResults memory actionResults = doAttackKing(userAddress, false);
-        assertEq(actionResults.outAddress, address(0));
-        assertEq(actionResults.outData, 0);
-        comparePointAllocation(KingOfTheDegens.CourtRole.King, kingOfTheDegens.activePointAllocationTemplate());
-        ActionResults memory actionResults2 = doAttackKing(userAddress, true);
-        assertEq(actionResults2.outAddress, kingOfTheDegens.king()[0]);
-        assertEq(actionResults2.outData, 1);
-        comparePointAllocation(KingOfTheDegens.CourtRole.King, KingOfTheDegens.PointAllocationTemplate.Dead);
+        // Attack King - Above threshold - King is Dead
+        doAttackKing(userAddress, true);
+        // Point Template should be set to Dead
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Dead)
+        );
+        // Make sure king has points from kingOfTheDegens.defaultPointAllocationTemplate() rather than Dead
+        assertEq(kingOfTheDegens.pointsBalance(address(1)), kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - kingOfTheDegens.kingProtectionBlocks(),
+            kingOfTheDegens.defaultPointAllocationTemplate()
+        ));
+        // Check knight points
+        uint256 userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
+        assertEq(userAddressPoints, kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.Knight,
+            block.number - kingOfTheDegens.kingProtectionBlocks(),
+            kingOfTheDegens.defaultPointAllocationTemplate()
+        ));
+        // Replace the king
+        doStorm(altUserAddress, altUserAddressKingSeed, 42069);
+        assertEq(uint8(kingOfTheDegens.courtRoles(altUserAddress)), uint8(KingOfTheDegens.CourtRole.King));
+        // Attack King - Below threshold
+        doAttackKing(userAddress, false);
+        // Point Template should reset to default
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(kingOfTheDegens.defaultPointAllocationTemplate())
+        );
+        // Old king should have same points total after storm as before storm
+        assertEq(kingOfTheDegens.pointsBalance(address(1)), kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - kingOfTheDegens.kingProtectionBlocks(),
+            kingOfTheDegens.defaultPointAllocationTemplate()
+        ));
+        // Fast forward 10_000 blocks
+        vm.roll(block.number + 10_000);
+        // Attack King - Above threshold
+        doAttackKing(userAddress, true);
+        // New king should have points from kingOfTheDegens.defaultPointAllocationTemplate() rather than Dead
+        uint256 newKingPointsBalance = kingOfTheDegens.pointsBalance(altUserAddress);
+        assertEq(newKingPointsBalance,
+            kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.King,
+                block.number - 10_000,
+                kingOfTheDegens.defaultPointAllocationTemplate()
+            )
+        );
+        userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
+        assertEq(userAddressPoints,
+            kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.Knight,
+                block.number - (10_000 + kingOfTheDegens.kingProtectionBlocks()),
+                kingOfTheDegens.defaultPointAllocationTemplate()
+            )
+        );
+        // Fast forward 10_000 blocks
+        vm.roll(block.number + 10_000);
+        // Realtime points for king should be the same, no points for 10k blocks
+        assertEq(kingOfTheDegens.getPoints(altUserAddress), newKingPointsBalance);
+        // Realtime points for userAddress who has been knight for 20_000 + kingProtectionBlocks
+        assertEq(kingOfTheDegens.getPoints(userAddress), kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.Knight,
+            block.number - 10_000,
+            KingOfTheDegens.PointAllocationTemplate.Dead
+        ) + userAddressPoints);
     }
 
     function test_GameStateActionStormFee() public {
@@ -436,7 +529,9 @@ contract KingOfTheDegensTest is Test {
         assertEq(courtPoints[0], 0);
         vm.roll(block.number + 10_000);
         uint256[13] memory courtPointsAfter = kingOfTheDegens.getCourtMemberPoints();
-        assertEq(courtPointsAfter[0], kingOfTheDegens.getPointsPerBlock(KingOfTheDegens.CourtRole.King) * 10_000);
+        assertEq(courtPointsAfter[0], kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King, block.number - 10_000
+        ));
     }
 
     function test_CourtHelper() public {
@@ -555,9 +650,9 @@ contract KingOfTheDegensTest is Test {
             KingOfTheDegens.CourtRole.King,
             block.number - kingOfTheDegens.kingProtectionBlocks())
         );
-        assertEq(userAddressPoints, 0);
-        // Roll forward 1000 blocks
-        vm.roll(block.number + 1000);
+        assertEq(kingOfTheDegens.pointsBalance(userAddress), 0);
+        // Roll forward 10_000 blocks
+        vm.roll(block.number + 10_000);
         // Set new point allocation
         doGameStateAction(userAddress, [uint256(2), uint256(0),  uint256(0),  uint256(0)], 42069, "pointAllocation");
         assertEq(
@@ -567,21 +662,26 @@ contract KingOfTheDegensTest is Test {
         userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
         assertEq(
             userAddressPoints,
-            kingOfTheDegens.calculatePointsEarned(KingOfTheDegens.CourtRole.King, block.number - 1000)
+            kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.King,
+                block.number - 10_000,
+                KingOfTheDegens.PointAllocationTemplate.Peoples)
         );
         // Roll forward 10_000 blocks
         vm.roll(block.number + 10_000);
-        // New king
+        // New king - This refreshes fullCourt pointBalance
         doStorm(altUserAddress, altUserAddressKingSeed, 0);
-        uint256 altUserBalanceBefore = getAddressBalance(altUserAddress);
-        uint256 userAddressPointsDifference = kingOfTheDegens.pointsBalance(userAddress) - userAddressPoints;
-        userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
         assertEq(
-            userAddressPointsDifference,
-            kingOfTheDegens.calculatePointsEarned(KingOfTheDegens.CourtRole.King, block.number - 10000)
-        );
+            kingOfTheDegens.pointsBalance(userAddress),
+            kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.King,
+                block.number - 10_000,
+                KingOfTheDegens.PointAllocationTemplate.Military
+            ) + userAddressPoints);
+        uint256 altUserBalanceBefore = getAddressBalance(altUserAddress);
         // Switch userAddress to Lord
         doStorm(userAddress, userAddressLordSeed, 0);
+        userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
         // Set stormFee
         doGameStateAction(userAddress, [uint256(2e15), uint256(0),  uint256(0),  uint256(0)], 42069, "stormFee");
         assertEq(kingOfTheDegens.stormFee(), 2e15);
@@ -592,13 +692,15 @@ contract KingOfTheDegensTest is Test {
         kingOfTheDegens.swapCourtMember(address(42069), courtIndex);
         assertEq(kingOfTheDegens.court(2), address(42069));
         assertEq(uint8(KingOfTheDegens.CourtRole.None), uint8(kingOfTheDegens.courtRoles(userAddress)));
-        userAddressPointsDifference = kingOfTheDegens.pointsBalance(userAddress) - userAddressPoints;
-        userAddressPoints = kingOfTheDegens.pointsBalance(userAddress);
         assertEq(
-            userAddressPointsDifference,
-            kingOfTheDegens.calculatePointsEarned(KingOfTheDegens.CourtRole.Lord, block.number - 10_000)
-        );
+            kingOfTheDegens.pointsBalance(userAddress),
+            kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.Lord,
+                block.number - 10_000,
+                kingOfTheDegens.defaultPointAllocationTemplate()
+            ) + userAddressPoints);
         uint256 blocksLeft = kingOfTheDegens.gameEndBlock() - block.number;
+        userAddressPoints = kingOfTheDegens.getPoints(userAddress);
         vm.roll(block.number + blocksLeft);
         assertEq(kingOfTheDegens.isGameEnded(), true);
         // Need realtime points balance to compare before redeem
@@ -907,7 +1009,7 @@ contract KingOfTheDegensTest is Test {
         KingOfTheDegens.PointAllocationTemplate pointAllocationTemplate
     ) internal {
         assertEq(
-            kingOfTheDegens.getActiveCourtRolePointAllocation(courtRole),
+            kingOfTheDegens.getCourtRolePointAllocation(courtRole),
             kingOfTheDegens.getCourtRolePointAllocation(courtRole, pointAllocationTemplate)
         );
     }

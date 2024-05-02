@@ -23,7 +23,8 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
     IV3SwapRouter constant swapRouter02 = IV3SwapRouter(0x2626664c2603336E57B271c5C0b26F421741e481);
     IUniswapV3Pool constant degenPool = IUniswapV3Pool(0xc9034c3E7F58003E6ae0C8438e7c8f4598d5ACAA);
     mapping(PointAllocationTemplate => uint256[7]) public pointAllocationTemplates;
-    PointAllocationTemplate public activePointAllocationTemplate = PointAllocationTemplate.Peoples;
+    PointAllocationTemplate public defaultPointAllocationTemplate = PointAllocationTemplate.Peoples;
+    PointAllocationTemplate public activePointAllocationTemplate = defaultPointAllocationTemplate;
     mapping(address => uint256) public stormBlock;
     mapping(address => CourtRole) public courtRoles;
     mapping(address => uint256) public pointsBalance;
@@ -127,6 +128,10 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         // Determine courtRole
         CourtRole courtRole = determineCourtRole(msg.sender, randomSeed);
         address outAddress = _rotateInCourtMember(msg.sender, courtRole);
+        // Set back to default pointAllocationTemplate if new king
+        if (courtRole == CourtRole.King) {
+            _setActivePointAllocationTemplate(defaultPointAllocationTemplate);
+        }
         // Increment play count
         storms++;
         // Make sure account can only storm every stormFrequencyBlocks blocks
@@ -269,22 +274,6 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
         return gameDurationBlocks * totalPointsPerBlock;
     }
 
-    function getActiveCourtRolePointAllocation(CourtRole courtRole) public view returns (uint256) {
-        return getCourtRolePointAllocation(courtRole, activePointAllocationTemplate);
-    }
-
-    function getCourtRolePointAllocation(
-        CourtRole courtRole,
-        PointAllocationTemplate pointAllocationTemplate
-    ) public view returns (uint256) {
-        if (courtRole == CourtRole.None) return 0;
-        return pointAllocationTemplates[pointAllocationTemplate][uint8(courtRole) - 1];
-    }
-
-    function getPointsPerBlock(CourtRole courtRole) public view returns (uint256) {
-        return (totalPointsPerBlock * getActiveCourtRolePointAllocation(courtRole) / 10_000);
-    }
-
     function determineCourtRole(address accountAddress, uint256 _randomSeed) public view returns (CourtRole) {
         uint256 random = Dice.rollDiceSet(
             1,
@@ -319,11 +308,33 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
 
     function calculatePointsEarned(
         CourtRole courtRole,
-        uint256 startBlock
+        uint256 startBlock,
+        PointAllocationTemplate pointAllocationTemplate
     ) public view returns (uint256) {
         uint256 endBlockNumber = block.number > gameEndBlock() ? gameEndBlock() : block.number;
         if (endBlockNumber <= startBlock) return 0;
-        return (endBlockNumber - startBlock) * getPointsPerBlock(courtRole);
+        return (endBlockNumber - startBlock)
+            * (totalPointsPerBlock * getCourtRolePointAllocation(courtRole, pointAllocationTemplate) / 10_000);
+    }
+
+
+    function calculatePointsEarned(
+        CourtRole courtRole,
+        uint256 startBlock
+    ) public view returns (uint256) {
+        return calculatePointsEarned(courtRole, startBlock, activePointAllocationTemplate);
+    }
+
+    function getCourtRolePointAllocation(CourtRole courtRole) public view returns (uint256) {
+        return getCourtRolePointAllocation(courtRole, activePointAllocationTemplate);
+    }
+
+    function getCourtRolePointAllocation(
+        CourtRole courtRole,
+        PointAllocationTemplate pointAllocationTemplate
+    ) public view returns (uint256) {
+        if (courtRole == CourtRole.None) return 0;
+        return pointAllocationTemplates[pointAllocationTemplate][uint8(courtRole) - 1];
     }
 
     function convertPointsToAssets(uint256 points) public view returns (uint256) {
@@ -581,20 +592,20 @@ contract KingOfTheDegens is Owned, Pausable, Trustus {
                                 _pointAllocationTemplates[i][5] +
                                 _pointAllocationTemplates[i][6];
             if (total != 10_000) revert InvalidPercentage(total);
-            pointAllocationTemplates[PointAllocationTemplate(i)] = _pointAllocationTemplates[i];
             if (isGameStarted()) {
                 // Need to restart streams for existing court members
                 restartCourtStreams();
             }
+            pointAllocationTemplates[PointAllocationTemplate(i)] = _pointAllocationTemplates[i];
         }
     }
 
     function _setActivePointAllocationTemplate(PointAllocationTemplate _pointAllocationTemplate) internal {
-        activePointAllocationTemplate = _pointAllocationTemplate;
         if (isGameStarted()) {
             // Need to restart streams for existing court members
             restartCourtStreams();
         }
+        activePointAllocationTemplate = _pointAllocationTemplate;
     }
 
     function _hasRedeemEnded() internal view returns (bool) {

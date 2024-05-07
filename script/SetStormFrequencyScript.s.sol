@@ -5,14 +5,14 @@ import "forge-std/console.sol";
 import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Script, console} from "forge-std/Script.sol";
 
-contract TransferOwnerScript is Script {
+contract SetStormFrequencyScript is Script {
     uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
-    function run(address contractAddress, address newOwner) public {
+    function run(address contractAddress, uint256 blocks) public {
         KingOfTheDegens kotd = KingOfTheDegens(payable(contractAddress));
         vm.startBroadcast(pk);
-        kotd.transferOwnership(newOwner);
-        console.log("Ownership transferred to: %s on contractAddress: %s", kotd.owner(), contractAddress);
+        kotd.setStormFrequency(blocks);
+        console.log("Storm Frequency set to: %d on contractAddress: %s", kotd.stormFrequencyBlocks(), contractAddress);
         vm.stopBroadcast();
     }
 }

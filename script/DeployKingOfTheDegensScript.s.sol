@@ -20,7 +20,7 @@ contract DeployKingOfTheDegensScript is Script {
     uint256[7] public roleCounts = [1, 2, 3, 4, 1, 1, 1];
     uint256 public immutable trustedSignerPrivateKey = vm.envUint("TRUSTUS_SIGNER_PRIVATE_KEY");
     address public immutable trustedSignerAddress = vm.addr(trustedSignerPrivateKey);
-//    address public immutable newOwnerAddress = 0x6Ca74A32F864918a7399d37592438A80Ec7Ec8D9;
+    uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
     // Starting Court
     address[1] public king = [0x2943E07Ca68FeBC79533d321F5D427136995ECB6];
     address[2] public lords = [
@@ -40,11 +40,10 @@ contract DeployKingOfTheDegensScript is Script {
     ];
 
     function run() public {
-        uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        vm.startBroadcast(key);
+        vm.startBroadcast(pk);
         kingOfTheDegens = newKingOfTheDegens();
         console.log("KingOfTheDegens Game deployed to: %s", address(kingOfTheDegens));
-        //startGame();
+        startGame(0);
         // Set Trustus address
         kingOfTheDegens.setIsTrusted(trustedSignerAddress, true);
         console.log("Trustus signer added: %s", trustedSignerAddress);
@@ -60,16 +59,19 @@ contract DeployKingOfTheDegensScript is Script {
         );
     }
 
-    function startGame() private {
+    function startGame(uint256 _startBlock) private {
         kingOfTheDegens.startGame(
             king,
             lords,
             knights,
             townsfolk,
             gameDurationBlocks,
-            0
+            _startBlock
         );
-        console.log("Game started");
+        console.log("Game started at block: %d with duration of: %d blocks",
+            _startBlock == 0 ? block.number : _startBlock,
+            gameDurationBlocks
+        );
     }
 
 //    function transferOwnership(address newOwner) private {

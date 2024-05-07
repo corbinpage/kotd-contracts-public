@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import {Script, console} from "forge-std/Script.sol";
-import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import "forge-std/console.sol";
-import {AlreadyDeployedScript} from "./AlreadyDeployedScript.sol";
+import {Script, console} from "forge-std/Script.sol";
+import {KingOfTheDegens} from "../../src/KingOfTheDegens.sol";
 
-contract MigrateGameScript is AlreadyDeployedScript {
-    KingOfTheDegens public contractOld = deployedKingOfTheDegens;
-    KingOfTheDegens public contractNew = KingOfTheDegens(payable(0x40Ec213312B4BFE20BAA68f7a3899115350A6607));
+contract MigrateGameScript is Script {
+    KingOfTheDegens public contractOld;
+    KingOfTheDegens public contractNew;
     address[10] public oldCourtAddresses;
     uint256 public chunkSize = 250;
     address[1] public transferKing;
@@ -17,11 +16,14 @@ contract MigrateGameScript is AlreadyDeployedScript {
     address[4] public transferTownsfolk;
 
 
-    function run() public {
+    function run(address _contractOld, address _contractNew) public {
+        contractOld = KingOfTheDegens(payable(_contractOld));
+        contractNew = KingOfTheDegens(payable(_contractNew));
         setOldCourt();
+        // PRODUCTION ONLY
         uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
         uint8 courtCount;
-        address[] memory degenUsers = vm.parseJsonAddressArray(vm.readFile('script/playerAddresses.json'), '');
+        address[] memory degenUsers = vm.parseJsonAddressArray(vm.readFile('script/migration/playerAddresses.json'), '');
         uint256[] memory points = new uint256[](degenUsers.length);
         uint256[] memory stormBlocks = new uint256[](degenUsers.length);
         for (uint256 i = 0;i < degenUsers.length;i++) {

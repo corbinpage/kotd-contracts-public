@@ -2,10 +2,11 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/console.sol";
-import {AlreadyDeployedScript} from "./AlreadyDeployedScript.sol";
+import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
+import {Script, console} from "forge-std/Script.sol";
 
-contract StartGameScript is AlreadyDeployedScript {
-    uint256 gameDurationBlocks = 1339200;
+contract StartGameScript is Script {
+    uint256 public gameDurationBlocks = 1339200;
     // Starting Court
     address[1] public king = [0x2943E07Ca68FeBC79533d321F5D427136995ECB6];
     address[2] public lords = [
@@ -23,19 +24,23 @@ contract StartGameScript is AlreadyDeployedScript {
         0x4a3e6E66f8C32bC05A50879f872B1177A1573CDF,
         0x4b91475af6eC45997794b513349aADf7772De95a
     ];
+    uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
-    function run() public {
-        uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        vm.startBroadcast(key);
-        deployedKingOfTheDegens.startGame(
+    function run(address contractAddress, uint256 _startBlock) public {
+        KingOfTheDegens kotd = KingOfTheDegens(payable(contractAddress));
+        vm.startBroadcast(pk);
+        kotd.startGame(
             king,
             lords,
             knights,
             townsfolk,
             gameDurationBlocks,
-            0
+            _startBlock
         );
-        console.log("Game started");
+        console.log("Game started at block: %d with duration of: %d blocks",
+            _startBlock == 0 ? block.number : _startBlock,
+            gameDurationBlocks
+        );
         vm.stopBroadcast();
     }
 }

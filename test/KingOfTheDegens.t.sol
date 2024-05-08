@@ -436,6 +436,94 @@ contract KingOfTheDegensTest is Test {
         assertEq(uint8(kingOfTheDegens.activePointAllocationTemplate()), uint8(4));
     }
 
+    function test_GameStateActionPointAllocationMulti() public {
+        address kingAddress = kingOfTheDegens.king()[0];
+        uint256 kingPointsBefore = kingOfTheDegens.pointsBalance(kingAddress);
+        // Dead King
+        doGameStateAction(
+            kingAddress,
+            [uint256(uint8(KingOfTheDegens.PointAllocationTemplate.Dead)), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Dead)
+        );
+        // Fast forward 1000 blocks
+        vm.roll(block.number + 1000);
+        // Military King
+        doGameStateAction(
+            kingAddress,
+            [uint256(uint8(KingOfTheDegens.PointAllocationTemplate.Military)), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Military)
+        );
+        // Balance should not have increased as was a dead king
+        assertEq(kingPointsBefore, kingOfTheDegens.pointsBalance(kingAddress));
+        // Fast forward 1 block
+        vm.roll(block.number + 1);
+        // Greedy King
+        doGameStateAction(
+            kingAddress,
+            [uint256(uint8(KingOfTheDegens.PointAllocationTemplate.Greedy)), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Greedy)
+        );
+        // Balance now 1 block worth of Military King
+        kingPointsBefore += kingOfTheDegens.calculatePointsEarned(
+            KingOfTheDegens.CourtRole.King,
+            block.number - 1,
+            KingOfTheDegens.PointAllocationTemplate.Military
+        );
+        assertEq(
+            kingPointsBefore,
+            kingOfTheDegens.pointsBalance(kingAddress)
+        );
+        // Switch to several pointAllocationTemplates in same block
+        // Dead King 1st
+        doGameStateAction(
+            kingAddress,
+            [uint256(uint8(KingOfTheDegens.PointAllocationTemplate.Dead)), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Dead)
+        );
+        // Peoples King 2nd
+        doGameStateAction(
+            kingAddress,
+            [uint256(uint8(KingOfTheDegens.PointAllocationTemplate.Peoples)), uint256(0), uint256(0), uint256(0)],
+            42069,
+            "pointAllocation"
+        );
+        assertEq(
+            uint8(kingOfTheDegens.activePointAllocationTemplate()),
+            uint8(KingOfTheDegens.PointAllocationTemplate.Peoples)
+        );
+        // Fast forward 1000 blocks
+        vm.roll(block.number + 1000);
+        // Expect points to have added 1000 blocks worth of Peoples (added last)
+        assertEq(
+            kingPointsBefore + kingOfTheDegens.calculatePointsEarned(
+                KingOfTheDegens.CourtRole.King,
+                block.number - 1000,
+                KingOfTheDegens.PointAllocationTemplate.Peoples
+            ),
+            kingOfTheDegens.getPoints(kingAddress)
+        );
+    }
+
     function testFail_GameStateActionPointAllocation() public {
         // Don't need to actually be on court so no reason to storm here
         // Invalid pointAllocationTemplate index

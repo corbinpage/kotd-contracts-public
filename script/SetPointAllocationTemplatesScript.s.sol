@@ -9,10 +9,10 @@ contract SetPointAllocationTemplatesScript is Script {
     uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
     uint256[7][5] public newPointAllocationTemplates = [
         [3100, 1400, 600, 350, 300, 300, 300],
-        [4900, 1300, 500, 250, 0, 0, 0],
-        [3100, 1200, 900, 350, 400, 0, 0],
-        [2400, 1200, 800, 550, 600, 0, 0],
-        [0, 1200, 1600, 550, 600, 0, 0]
+        [4300, 1100, 500, 250, 0, 1000, 0],
+        [3000, 1100, 800, 250, 400, 1000, 0],
+        [2200, 1000, 800, 550, 600, 600, 0],
+        [0, 1100, 1600, 550, 0, 800, 0]
     ];
 
     function run(address contractAddress) public {

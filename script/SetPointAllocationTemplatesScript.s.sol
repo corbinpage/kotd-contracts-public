@@ -6,7 +6,7 @@ import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Script, console} from "forge-std/Script.sol";
 
 contract SetPointAllocationTemplatesScript is Script {
-    uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+    uint256 public pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
     uint256[7][5] public newPointAllocationTemplates = [
         [3100, 1400, 600, 350, 300, 300, 300],
         [4300, 1100, 500, 250, 0, 1000, 0],

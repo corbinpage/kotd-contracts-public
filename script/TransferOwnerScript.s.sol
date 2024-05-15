@@ -6,7 +6,7 @@ import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Script, console} from "forge-std/Script.sol";
 
 contract TransferOwnerScript is Script {
-    uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+    uint256 public pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
     function run(address contractAddress, address newOwner) public {
         KingOfTheDegens kotd = KingOfTheDegens(payable(contractAddress));

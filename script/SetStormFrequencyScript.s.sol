@@ -6,7 +6,7 @@ import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 import {Script, console} from "forge-std/Script.sol";
 
 contract SetStormFrequencyScript is Script {
-    uint256 public immutable pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+    uint256 public pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
     function run(address contractAddress, uint256 blocks) public {
         KingOfTheDegens kotd = KingOfTheDegens(payable(contractAddress));

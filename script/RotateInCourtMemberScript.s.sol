@@ -5,14 +5,18 @@ import "forge-std/console.sol";
 import {Script, console} from "forge-std/Script.sol";
 import {KingOfTheDegens} from "../src/KingOfTheDegens.sol";
 
-contract SetStormFeeScript is Script {
+contract RotateInCourtMemberScript is Script {
     uint256 public pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
-    function run(address contractAddress, uint256 _stormFee) public {
+    function run(address contractAddress, address inAddress, KingOfTheDegens.CourtRole courtRole) public {
         KingOfTheDegens kotd = KingOfTheDegens(payable(contractAddress));
         vm.startBroadcast(pk);
-        kotd.setStormFee(_stormFee);
-        console.log("Storm Fee set to: %d on contractAddress: %s", kotd.stormFee(), contractAddress);
+        kotd.rotateInCourtMember(inAddress, courtRole);
+        console.log("New address rotated in: %s to courtRole: %d on contractAddress: %s",
+            inAddress,
+            uint8(courtRole),
+            contractAddress
+        );
         vm.stopBroadcast();
     }
 }
